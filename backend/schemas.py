@@ -1,11 +1,14 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 
 
 class CatchUpdate(BaseModel):
     species_label: Optional[str] = None
     species_confidence: Optional[float] = None
+    # allow patching geo if you want
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 class CatchBase(BaseModel):
     image_path: str
@@ -13,12 +16,19 @@ class CatchBase(BaseModel):
     species_confidence: float
     user_id: Optional[str] = None
 
-class CatchRead(CatchBase):
+class CatchRead(BaseModel):
     id: int
+    image_path: str
+    species_label: Optional[str] = None
+    species_confidence: float
     created_at: datetime
-
+    user_id: Optional[str] = None
+    # 🆕
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    weather_json: Optional[Any] = None
     class Config:
-        from_attributes = True  # Pydantic v2
+        orm_mode = True
 
 class SpeciesRead(BaseModel):
     id: int

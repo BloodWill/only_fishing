@@ -1,0 +1,64 @@
+species_id,common_name,scientific_name,habitat,enabled,notes
+sp_lmb,Largemouth Bass,Micropterus salmoides,freshwater,True,Core sportfish; ponds/lakes.
+sp_smb,Smallmouth Bass,Micropterus dolomieu,freshwater,True,Rivers/reservoirs; rocky habitat.
+sp_rkb,Rock Bass,Ambloplites rupestris,freshwater,True,Present in western/central MA.
+sp_bg,Bluegill,Lepomis macrochirus,freshwater,True,Common panfish statewide.
+sp_pse,Pumpkinseed,Lepomis gibbosus,freshwater,True,Very common sunfish in MA.
+sp_rbs,Redbreast Sunfish,Lepomis auritus,freshwater,True,Rivers/ponds; central/eastern MA.
+sp_bcr,Black Crappie,Pomoxis nigromaculatus,freshwater,True,Common in larger ponds/lakes.
+sp_wcr,White Crappie,Pomoxis annularis,freshwater,False,Less common in MA; enable later.
+sp_yp,Yellow Perch,Perca flavescens,freshwater,True,Very common statewide.
+sp_wp,White Perch,Morone americana,freshwater,True,"Coastal/inland, anadromous origins."
+sp_cpk,Chain Pickerel,Esox niger,freshwater,True,Very common; weedy ponds.
+sp_npk,Northern Pike,Esox lucius,freshwater,True,Present in CT River/selected lakes.
+sp_wal,Walleye,Sander vitreus,freshwater,True,Stocked/established in select waters.
+sp_rbt,Rainbow Trout,Oncorhynchus mykiss,freshwater,True,Stocked statewide.
+sp_brt,Brown Trout,Salmo trutta,freshwater,True,Stocked; some wild pops.
+sp_bkt,Brook Trout,Salvelinus fontinalis,freshwater,True,Native; cold-water streams.
+sp_lkt,Lake Trout,Salvelinus namaycush,freshwater,False,Wachusett/Quabbin; enable later.
+sp_las,Landlocked Salmon,Salmo salar,freshwater,False,Quabbin historic; enable later.
+sp_ccp,Common Carp,Cyprinus carpio,freshwater,True,Widespread in warm waters.
+sp_ffh,Fallfish,Semotilus corporalis,freshwater,True,Large native minnow; rivers.
+sp_ccb,Creek Chub,Semotilus atromaculatus,freshwater,True,Common small streams.
+sp_gsh,Golden Shiner,Notemigonus crysoleucas,freshwater,True,Common baitfish.
+sp_bbh,Brown Bullhead,Ameiurus nebulosus,freshwater,True,Common in ponds.
+sp_ybh,Yellow Bullhead,Ameiurus natalis,freshwater,True,Occurs with brown bullhead.
+sp_ccf,Channel Catfish,Ictalurus punctatus,freshwater,True,Stocked/established some waters.
+sp_wsk,White Sucker,Catostomus commersonii,freshwater,True,Common statewide.
+sp_ae,American Eel,Anguilla rostrata,freshwater,True,Catadromous; found inland/coastal.
+sp_tdr,Tessellated Darter,Etheostoma olmstedi,freshwater,False,"Small darter, enable later."
+sp_ssc,Slimy Sculpin,Cottus cognatus,freshwater,False,Cold streams; enable later.
+sp_bds,Banded Sunfish,Enneacanthus obesus,freshwater,False,SE MA/CCC region; enable later.
+sp_bnd,Blacknose Dace,Rhinichthys atratulus,freshwater,False,Small streams; enable later.
+sp_brs,Bridle Shiner,Notropis bifrenatus,freshwater,False,Species of concern; enable later.
+sp_sts,Spottail Shiner,Notropis hudsonius,freshwater,False,Bait species; enable later.
+sp_stb,Striped Bass,Morone saxatilis,inshore,True,Iconic MA inshore sportfish.
+sp_blf,Bluefish,Pomatomus saltatrix,inshore,True,Common summer/fall.
+sp_amk,Atlantic Mackerel,Scomber scombrus,inshore,True,Spring runs nearshore.
+sp_amn,Atlantic Menhaden,Brevoortia tyrannus,inshore,True,Baitfish (pogies).
+sp_scp,Scup,Stenotomus chrysops,inshore,True,Porgy; common on structure.
+sp_bsb,Black Sea Bass,Centropristis striata,inshore,True,Rebounded; common Cape/Islands.
+sp_ttg,Tautog,Tautoga onitis,inshore,True,Blackfish; rocky bottom.
+sp_sff,Summer Flounder,Paralichthys dentatus,inshore,True,Fluke; sandy flats/edges.
+sp_wtf,Winter Flounder,Pseudopleuronectes americanus,inshore,True,Inshore bays/harbors.
+sp_wpf,Windowpane Flounder,Scophthalmus aquosus,inshore,False,Bycatch; enable later.
+sp_cod,Atlantic Cod,Gadus morhua,offshore,False,Mostly offshore; enable later.
+sp_had,Haddock,Melanogrammus aeglefinus,offshore,False,Offshore grounds; enable later.
+sp_plk,Pollock,Pollachius virens,offshore,False,Inshore/offshore; enable later.
+sp_cnr,Cunner,Tautogolabrus adspersus,inshore,True,Bergall; structure-loving.
+sp_ahr,Atlantic Herring,Clupea harengus,inshore,False,Forage; enable later.
+sp_ash,American Shad,Alosa sapidissima,anadromous,True,Rivers (CT/Merrimack).
+sp_hsh,Hickory Shad,Alosa mediocris,anadromous,False,Occasional; enable later.
+sp_alw,Alewife,Alosa pseudoharengus,anadromous,True,River herring; spring runs.
+sp_bbhg,Blueback Herring,Alosa aestivalis,anadromous,True,River herring; spring runs.
+sp_rsm,Rainbow Smelt,Osmerus mordax,anadromous,True,Winter smelt fisheries.
+sp_ltu,Little Tunny (False Albacore),Euthynnus alletteratus,inshore,True,Late-summer albie runs (Cape).
+sp_abo,Atlantic Bonito,Sarda sarda,inshore,True,Warm-season nearshore.
+sp_wkf,Weakfish,Cynoscion regalis,inshore,False,Uncommon north; enable later.
+sp_sdf,Spiny Dogfish,Squalus acanthias,inshore,False,Common but not primary target.
+sp_smd,Smooth Dogfish,Mustelus canis,inshore,False,Occasional inshore; enable later.
+sp_nkf,Northern Kingfish,Menticirrhus saxatilis,inshore,False,Sandy beaches; enable later.
+sp_npf,Northern Puffer,Sphoeroides maculatus,inshore,False,Occasional; enable later.
+sp_nsr,Northern Sea Robin,Prionotus carolinus,inshore,False,Common bycatch; enable later.
+sp_gsf,Goosefish (Monkfish),Lophius americanus,inshore,False,Occasional inshore; enable later.
+sp_awf,Atlantic Wolffish,Anarhichas lupus,offshore,False,Rare/protected; enable later.

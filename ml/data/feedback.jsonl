@@ -1,0 +1,2 @@
+{"image_sha1": "<sha1>", "chosen_species_id": "sp_lmb", "topk": [], "user_id": null, "source": "app"}
+{"image_sha1": "string", "chosen_species_id": "string", "topk": [{"additionalProp1": {}}], "user_id": "string", "source": "app"}

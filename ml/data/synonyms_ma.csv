@@ -1,0 +1,60 @@
+name,species_id
+bucketmouth,sp_lmb
+largie,sp_lmb
+large mouth bass,sp_lmb
+lm bass,sp_lmb
+smallie,sp_smb
+bronzeback,sp_smb
+sm bass,sp_smb
+sunfish,sp_bg
+bream,sp_bg
+blue gill,sp_bg
+pumpkin seed,sp_pse
+pumpkin seed sunfish,sp_pse
+redbreast,sp_rbs
+red breast sunfish,sp_rbs
+speck,sp_bcr
+calico bass,sp_bcr
+perch,sp_yp
+ring perch,sp_yp
+white perch,sp_wp
+pickerel,sp_cpk
+slime dart,sp_cpk
+pike,sp_npk
+northern,sp_npk
+walleye pike,sp_wal
+eyes,sp_wal
+rainbow,sp_rbt
+brown,sp_brt
+brookie,sp_bkt
+squaretail,sp_bkt
+common carp,sp_ccp
+mirror carp,sp_ccp
+bullhead,sp_bbh
+yellow bullhead,sp_ybh
+channel cat,sp_ccf
+shiner,sp_gsh
+white sucker,sp_wsk
+eel,sp_ae
+striper,sp_stb
+striped bass,sp_stb
+blue fish,sp_blf
+pogies,sp_amn
+menhaden,sp_amn
+porgy,sp_scp
+black seabass,sp_bsb
+sea bass,sp_bsb
+tog,sp_ttg
+blackfish,sp_ttg
+fluke,sp_sff
+winter flattie,sp_wtf
+cunner,sp_cnr
+bergall,sp_cnr
+herring,sp_ahr
+river herring,sp_alw
+alewife,sp_alw
+blueback,sp_bbhg
+smelt,sp_rsm
+albie,sp_ltu
+false albacore,sp_ltu
+bonito,sp_abo

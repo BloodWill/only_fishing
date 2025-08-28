@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint, Text
 from sqlalchemy.sql import func
 from backend.database import Base
 from sqlalchemy.orm import relationship
@@ -13,6 +13,10 @@ class Catch(Base):
     species_confidence = Column(Float, nullable=False)    # model top-1 confidence (0..1)
     user_id = Column(String, nullable=True)               # TODO: wire real auth later
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+        # 🆕 geo + weather
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    weather_json = Column(Text, nullable=True)  # store raw JSON string
 
 class Species(Base):
     __tablename__ = "species"
