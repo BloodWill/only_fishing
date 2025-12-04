@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { StyleSheet, View, Text, Image, TouchableOpacity, ActivityIndicator, Platform, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import Top3Picker from "@/components/Top3Picker";
+import Top3Picker from "../../components/top3Picker";
 import { predictFish, sendFeedback, type TopKItem } from "@/lib/api";
 import { getUserId } from "@/lib/user";
 
