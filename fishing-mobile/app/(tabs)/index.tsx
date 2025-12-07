@@ -1,5 +1,5 @@
 // app/(tabs)/index.tsx
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -28,6 +28,26 @@ import { LinearGradient } from "expo-linear-gradient";
 import { API_BASE, bust } from "../../config";
 import { addLocalCatch, updateLocalCatch, LocalCatch } from "@/lib/storage";
 import { getUserId } from "@/lib/user";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// Import constants from centralized location
+import {
+  ALL_FISH,
+  IN_SEASON_FISH,
+  COMMON_FISH,
+  FISHING_REGULATIONS,
+  getActivityColor,
+  getFishByName,
+  type FishData,
+  type FishingRegulation,
+} from "@/constants/fishData";
+import {
+  getMoonPhase,
+  getWindDirection,
+  getAirQualityInfo,
+  calculateFishingCondition,
+  getConditionColor,
+} from "@/constants/weather";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PADDING = 16;
@@ -37,8 +57,8 @@ const WEATHER_ITEM_WIDTH = (SCREEN_WIDTH - PADDING * 2 - 20 - GAP) / 2;
 // ===========================================
 // GOOGLE API CONFIGURATION
 // ===========================================
-const GOOGLE_WEATHER_API_KEY = "AIzaSyD2gq69ajn05LWdbLB6w-0uJj6ybQDU_VY";
-const GOOGLE_GEOCODING_API_KEY = "AIzaSyD2gq69ajn05LWdbLB6w-0uJj6ybQDU_VY";
+const GOOGLE_WEATHER_API_KEY = "AIzaSyC6LqO4UlawM9lsmm-FxncqWW4Hy7Nslhc";
+const GOOGLE_GEOCODING_API_KEY = "AIzaSyC6LqO4UlawM9lsmm-FxncqWW4Hy7Nslhc";
 
 // Types
 type IdentifyResponse = {
@@ -48,18 +68,6 @@ type IdentifyResponse = {
 };
 
 type SpeciesItem = { id: number; common_name: string; icon_path?: string | null };
-
-type FishData = {
-  id: string;
-  name: string;
-  activity: "High" | "Medium" | "Low";
-  icon: string;
-  description: string;
-  habitat: string;
-  bestTime: string;
-  avgSize: string;
-  bait: string;
-};
 
 type WeatherData = {
   temperature: number;
@@ -120,40 +128,7 @@ type GoogleWeatherResponse = {
   weatherCondition?: { description?: { text?: string } };
 };
 
-// Fish data
-const ALL_FISH: FishData[] = [
-  { id: "bass", name: "Largemouth Bass", activity: "High", icon: "🐟", description: "Popular game fish.", habitat: "Lakes, ponds", bestTime: "Early morning", avgSize: "12-18 in", bait: "Plastic worms" },
-  { id: "catfish", name: "Channel Catfish", activity: "High", icon: "🐠", description: "Bottom-dwelling.", habitat: "Rivers, lakes", bestTime: "Night", avgSize: "15-24 in", bait: "Chicken liver" },
-  { id: "perch", name: "Yellow Perch", activity: "High", icon: "🐡", description: "Popular panfish.", habitat: "Lakes", bestTime: "Morning", avgSize: "6-10 in", bait: "Minnows" },
-  { id: "crappie", name: "Crappie", activity: "High", icon: "🐠", description: "Excellent eating.", habitat: "Lakes", bestTime: "Spring", avgSize: "8-12 in", bait: "Small jigs" },
-  { id: "carp", name: "Common Carp", activity: "High", icon: "🐟", description: "Strong fighters.", habitat: "Warm waters", bestTime: "Afternoon", avgSize: "10-25 in", bait: "Corn" },
-  { id: "striped", name: "Striped Bass", activity: "High", icon: "🐠", description: "Powerful swimmers.", habitat: "Coastal", bestTime: "Tide changes", avgSize: "18-30 in", bait: "Live bait" },
-  { id: "trout", name: "Rainbow Trout", activity: "Medium", icon: "🎣", description: "Beautiful fish.", habitat: "Cold streams", bestTime: "Morning", avgSize: "10-14 in", bait: "Flies" },
-  { id: "bluegill", name: "Bluegill", activity: "Medium", icon: "🐟", description: "Great for beginners.", habitat: "Shallow waters", bestTime: "Midday", avgSize: "6-8 in", bait: "Worms" },
-  { id: "walleye", name: "Walleye", activity: "Medium", icon: "🐠", description: "Prized game fish.", habitat: "Large lakes", bestTime: "Dusk", avgSize: "15-20 in", bait: "Nightcrawlers" },
-  { id: "smallmouth", name: "Smallmouth Bass", activity: "Medium", icon: "🐟", description: "Aggressive.", habitat: "Clear streams", bestTime: "Morning", avgSize: "12-16 in", bait: "Crayfish" },
-  { id: "pike", name: "Northern Pike", activity: "Low", icon: "🦈", description: "Predator.", habitat: "Weedy lakes", bestTime: "Fall", avgSize: "24-36 in", bait: "Spoons" },
-  { id: "salmon", name: "Atlantic Salmon", activity: "Low", icon: "🐟", description: "Iconic fish.", habitat: "Rivers", bestTime: "Fall", avgSize: "20-30 in", bait: "Flies" },
-];
-
-// Fishing regulations by species (example data - would come from API based on location)
-const FISHING_REGULATIONS: Record<string, { minSize: string; dailyLimit: number | string; season: string; notes: string }> = {
-  "Largemouth Bass": { minSize: "12 inches", dailyLimit: 5, season: "Year-round", notes: "Only 1 fish over 15 inches allowed per day" },
-  "Channel Catfish": { minSize: "12 inches", dailyLimit: 10, season: "Year-round", notes: "No size limit in some waters" },
-  "Yellow Perch": { minSize: "No minimum", dailyLimit: 25, season: "Year-round", notes: "Check local waters for specific limits" },
-  "Crappie": { minSize: "9 inches", dailyLimit: 25, season: "Year-round", notes: "Combined black and white crappie limit" },
-  "Common Carp": { minSize: "No minimum", dailyLimit: "No limit", season: "Year-round", notes: "Considered invasive in many areas" },
-  "Striped Bass": { minSize: "28 inches", dailyLimit: 2, season: "May 1 - Dec 31", notes: "Slot limit may apply: 28-35 inches" },
-  "Rainbow Trout": { minSize: "No minimum", dailyLimit: 5, season: "Year-round", notes: "Catch and release only in some streams" },
-  "Bluegill": { minSize: "No minimum", dailyLimit: 25, season: "Year-round", notes: "Combined sunfish limit" },
-  "Walleye": { minSize: "15 inches", dailyLimit: 6, season: "May 1 - Feb 28", notes: "Special regulations on some lakes" },
-  "Smallmouth Bass": { minSize: "12 inches", dailyLimit: 5, season: "Year-round", notes: "Catch and release June 1-15" },
-  "Northern Pike": { minSize: "24 inches", dailyLimit: 3, season: "May 1 - Feb 28", notes: "Only 1 fish over 34 inches" },
-  "Atlantic Salmon": { minSize: "15 inches", dailyLimit: 2, season: "Apr 1 - Oct 31", notes: "Special permit may be required" },
-};
-
-const IN_SEASON_FISH = ALL_FISH.filter((f) => f.activity === "High");
-const COMMON_FISH = ALL_FISH;
+// Fallback species list for the picker
 const FALLBACK_SPECIES: SpeciesItem[] = ALL_FISH.map((f, i) => ({ id: -(i + 1), common_name: f.name }));
 
 // ===========================================
@@ -189,30 +164,6 @@ async function getCurrentLatLng(): Promise<{ lat: number | null; lng: number | n
     console.error("Location error:", e);
     return { lat: null, lng: null };
   }
-}
-
-const getActivityColor = (a: string) => a === "High" ? "#22c55e" : a === "Medium" ? "#eab308" : "#ef4444";
-
-function getWindDirection(d: number): string {
-  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-  return dirs[Math.round(d / 45) % 8];
-}
-
-function getMoonPhase(): string {
-  const d = new Date();
-  const c = Math.floor(365.25 * d.getFullYear()) + Math.floor(30.6 * (d.getMonth() + 1)) + d.getDate() - 694039.09;
-  const p = (c / 29.53) % 1;
-  if (p < 0.125) return "🌑 New";
-  if (p < 0.375) return "🌓 First Quarter";
-  if (p < 0.625) return "🌕 Full";
-  if (p < 0.875) return "🌗 Last Quarter";
-  return "🌑 New";
-}
-
-function getAirQualityLabel(aqi: number): string {
-  if (aqi <= 50) return "Good";
-  if (aqi <= 100) return "Moderate";
-  return "Poor";
 }
 
 // ===========================================
@@ -285,33 +236,11 @@ async function getPlaceDetails(placeId: string): Promise<{ lat: number; lng: num
 }
 
 // ===========================================
-// FISHING CONDITION CALCULATOR
-// ===========================================
-function calculateFishingCondition(temp: number, humidity: number, wind: number, condition: string, pressure: number): string {
-  let score = 0;
-  if (temp >= 60 && temp <= 75) score += 3;
-  else if (temp >= 50 && temp <= 85) score += 2;
-  else if (temp >= 40 && temp <= 95) score += 1;
-  if (wind >= 5 && wind <= 15) score += 2;
-  else if (wind < 5) score += 1;
-  else if (wind > 20) score -= 1;
-  if (humidity >= 50 && humidity <= 70) score += 1;
-  if (pressure >= 1010 && pressure <= 1020) score += 2;
-  const lc = condition.toLowerCase();
-  if (lc.includes("cloud") || lc.includes("overcast")) score += 2;
-  else if (lc.includes("partly")) score += 1;
-  else if (lc.includes("rain") || lc.includes("storm")) score -= 2;
-  if (score >= 8) return "Excellent";
-  if (score >= 5) return "Good";
-  if (score >= 3) return "Fair";
-  return "Poor";
-}
-
-// ===========================================
 // WEATHER API FETCH
 // ===========================================
 async function fetchGoogleWeather(lat: number, lng: number): Promise<WeatherData> {
-  const moonPhase = getMoonPhase();
+  const moonPhaseInfo = getMoonPhase();
+  const moonPhase = `${moonPhaseInfo.icon} ${moonPhaseInfo.name}`;
   const base: WeatherData = {
     temperature: 72, feelsLike: 70, condition: "Partly Cloudy", humidity: 65, windSpeed: 8, windDirection: "SW",
     fishingCondition: "Good", uvIndex: 4, visibility: 10, pressure: 1015, dewPoint: 55, cloudCover: 40,
@@ -354,13 +283,14 @@ async function fetchGoogleWeather(lat: number, lng: number): Promise<WeatherData
     const cloudCover = current.cloudCover ?? 0;
     const waterTemp = temperature - 12 + Math.floor(Math.random() * 8);
     const airQualityIndex = 30 + Math.floor(Math.random() * 40);
+    const airQualityInfo = getAirQualityInfo(airQualityIndex);
 
     return {
       temperature, feelsLike, condition, humidity, windSpeed, windDirection,
-      fishingCondition: calculateFishingCondition(temperature, humidity, windSpeed, condition, pressure),
+      fishingCondition: calculateFishingCondition({ temperature, humidity, windSpeed, condition, pressure, moonPhase: moonPhaseInfo.name }),
       uvIndex, visibility, pressure, dewPoint, cloudCover,
       sunrise: "6:45 AM", sunset: "5:30 PM", moonPhase,
-      airQuality: getAirQualityLabel(airQualityIndex), airQualityIndex, waterTemp,
+      airQuality: airQualityInfo.label, airQualityIndex, waterTemp,
       isLoading: false, error: null,
     };
   } catch (e: any) {
@@ -435,15 +365,70 @@ function LocationPickerModal({ visible, onClose, onSelect, onUseCurrent, current
 }
 
 // ===========================================
+// DATE TAB SELECTOR FOR WEATHER
+// ===========================================
+function DateTabSelector({ selectedDate, onSelectDate }: { selectedDate: Date; onSelectDate: (date: Date) => void }) {
+  const dates = useMemo(() => {
+    const result: Date[] = [];
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      result.push(d);
+    }
+    return result;
+  }, []);
+
+  const formatDay = (date: Date, index: number) => {
+    if (index === 0) return "Today";
+    if (index === 1) return "Tomorrow";
+    return date.toLocaleDateString("en-US", { weekday: "short" });
+  };
+
+  const formatDate = (date: Date) => {
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  const isSelected = (date: Date) => {
+    return date.toDateString() === selectedDate.toDateString();
+  };
+
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dateTabContainer} contentContainerStyle={styles.dateTabContent}>
+      {dates.map((date, index) => (
+        <TouchableOpacity
+          key={date.toISOString()}
+          style={[styles.dateTab, isSelected(date) && styles.dateTabActive]}
+          onPress={() => onSelectDate(date)}
+        >
+          <Text style={[styles.dateTabDay, isSelected(date) && styles.dateTabDayActive]}>{formatDay(date, index)}</Text>
+          <Text style={[styles.dateTabDate, isSelected(date) && styles.dateTabDateActive]}>{formatDate(date)}</Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  );
+}
+
+// ===========================================
 // WEATHER CARD WITH CAROUSEL
 // ===========================================
-function WeatherCard({ weather, location, onLocationPress }: { weather: WeatherData; location: LocationData; onLocationPress: () => void }) {
+function WeatherCard({ weather, location, onLocationPress, selectedDate, onSelectDate }: { 
+  weather: WeatherData; 
+  location: LocationData; 
+  onLocationPress: () => void;
+  selectedDate: Date;
+  onSelectDate: (date: Date) => void;
+}) {
   const [page, setPage] = useState(0);
   const cardWidth = SCREEN_WIDTH - PADDING * 2;
 
   const getCondColor = (c: string) => c === "Excellent" ? "#22c55e" : c === "Good" ? "#4ade80" : c === "Fair" ? "#eab308" : "#ef4444";
   const getAQIColor = (a: number) => a <= 50 ? "#22c55e" : a <= 100 ? "#eab308" : "#ef4444";
   const locDisplay = location.isLoading ? "Loading..." : location.city && location.region ? `${location.city}, ${location.region}` : location.city || "Select Location";
+  
+  const isToday = selectedDate.toDateString() === new Date().toDateString();
+  const dayName = selectedDate.toLocaleDateString("en-US", { weekday: "long" });
+  const title = isToday ? "Today's Conditions" : `${dayName}'s Forecast`;
 
   if (weather.isLoading) {
     return <View style={styles.weatherCard}><View style={styles.weatherHeader}><Text style={styles.weatherHeaderIcon}>☁️</Text><Text style={styles.weatherTitle}>Loading...</Text></View><ActivityIndicator size="large" color="#0891b2" style={{ padding: 40 }} /></View>;
@@ -452,10 +437,26 @@ function WeatherCard({ weather, location, onLocationPress }: { weather: WeatherD
   return (
     <View style={styles.weatherCard}>
       <View style={styles.weatherHeader}>
-        <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}><Text style={styles.weatherHeaderIcon}>☁️</Text><Text style={styles.weatherTitle}>Today's Fishing Conditions</Text></View>
+        <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+          <Text style={styles.weatherHeaderIcon}>☁️</Text>
+          <Text style={styles.weatherTitle}>{title}</Text>
+          {!isToday && <View style={styles.forecastBadge}><Text style={styles.forecastBadgeText}>Forecast</Text></View>}
+        </View>
         <TouchableOpacity style={styles.locBadge} onPress={onLocationPress}><Text style={{ fontSize: 10 }}>📍</Text><Text style={styles.locText} numberOfLines={1}>{locDisplay}</Text><Text style={{ fontSize: 8, color: "#0369a1" }}>▼</Text></TouchableOpacity>
       </View>
+      
+      {/* Date Tab Selector */}
+      <DateTabSelector selectedDate={selectedDate} onSelectDate={onSelectDate} />
+      
       {weather.error && <View style={styles.errorBanner}><Text style={styles.errorText}>⚠️ {weather.error}</Text></View>}
+      
+      {/* Forecast note for future dates */}
+      {!isToday && (
+        <View style={styles.forecastNote}>
+          <Text style={styles.forecastNoteText}>📅 Predicted conditions for {selectedDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</Text>
+        </View>
+      )}
+      
       <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} onScroll={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / cardWidth))} scrollEventThrottle={16}>
         {/* Page 1 */}
         <View style={[styles.weatherPage, { width: cardWidth }]}>
@@ -597,11 +598,137 @@ export default function Home() {
     sunrise: "6:45 AM", sunset: "5:30 PM", moonPhase: getMoonPhase(), airQuality: "Good", airQualityIndex: 35, waterTemp: 55,
     isLoading: true, error: null,
   });
+  
+  // Store 7-day forecast
+  const [forecast, setForecast] = useState<WeatherData[]>([]);
 
   const [location, setLocation] = useState<LocationData>({ lat: null, lng: null, city: null, region: null, formattedAddress: null, isLoading: true, isCurrentLocation: true });
   const [deviceLoc, setDeviceLoc] = useState<{ lat: number | null; lng: number | null }>({ lat: null, lng: null });
   const [deviceLocName, setDeviceLocName] = useState("");
   const [locPickerOpen, setLocPickerOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
+  const [defaultLocation, setDefaultLocation] = useState<{ lat: number; lng: number; name: string } | null>(null);
+  const [setDefaultPromptOpen, setSetDefaultPromptOpen] = useState(false);
+  const [pendingLocation, setPendingLocation] = useState<{ lat: number; lng: number; name: string } | null>(null);
+
+  // Load default location from storage
+  useEffect(() => {
+    AsyncStorage.getItem("defaultLocation").then((stored) => {
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          setDefaultLocation(parsed);
+        } catch {}
+      }
+    });
+  }, []);
+
+  const saveDefaultLocation = async (loc: { lat: number; lng: number; name: string }) => {
+    setDefaultLocation(loc);
+    await AsyncStorage.setItem("defaultLocation", JSON.stringify(loc));
+  };
+
+  // Generate 7-day forecast based on today's weather
+  const generate7DayForecast = useCallback((todayWeather: WeatherData): WeatherData[] => {
+    const conditions = ["Sunny", "Partly Cloudy", "Cloudy", "Light Rain", "Overcast", "Clear", "Scattered Clouds"];
+    const forecasts: WeatherData[] = [todayWeather]; // Day 0 is today's actual weather
+    
+    for (let i = 1; i < 7; i++) {
+      // Create variation for each day
+      const tempVariation = Math.floor(Math.random() * 16) - 8; // -8 to +8 degrees
+      const humidityVariation = Math.floor(Math.random() * 20) - 10; // -10 to +10%
+      const windVariation = Math.floor(Math.random() * 10) - 5; // -5 to +5 mph
+      const condition = conditions[Math.floor(Math.random() * conditions.length)];
+      
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + i);
+      
+      // Calculate moon phase for future date
+      const c = Math.floor(365.25 * futureDate.getFullYear()) + Math.floor(30.6 * (futureDate.getMonth() + 1)) + futureDate.getDate() - 694039.09;
+      const p = (c / 29.53) % 1;
+      let moonPhase = "🌑 New";
+      if (p >= 0.0625 && p < 0.1875) moonPhase = "🌒 Waxing Crescent";
+      else if (p >= 0.1875 && p < 0.3125) moonPhase = "🌓 First Quarter";
+      else if (p >= 0.3125 && p < 0.4375) moonPhase = "🌔 Waxing Gibbous";
+      else if (p >= 0.4375 && p < 0.5625) moonPhase = "🌕 Full";
+      else if (p >= 0.5625 && p < 0.6875) moonPhase = "🌖 Waning Gibbous";
+      else if (p >= 0.6875 && p < 0.8125) moonPhase = "🌗 Last Quarter";
+      else if (p >= 0.8125 && p < 0.9375) moonPhase = "🌘 Waning Crescent";
+      
+      const temp = Math.max(20, Math.min(100, todayWeather.temperature + tempVariation));
+      const humidity = Math.max(20, Math.min(95, todayWeather.humidity + humidityVariation));
+      const windSpeed = Math.max(0, todayWeather.windSpeed + windVariation);
+      const pressure = todayWeather.pressure + Math.floor(Math.random() * 10) - 5;
+      
+      // Calculate fishing condition for this day
+      let score = 0;
+      if (temp >= 60 && temp <= 75) score += 3;
+      else if (temp >= 50 && temp <= 85) score += 2;
+      else if (temp >= 40 && temp <= 95) score += 1;
+      if (windSpeed >= 5 && windSpeed <= 15) score += 2;
+      else if (windSpeed < 5) score += 1;
+      else if (windSpeed > 20) score -= 1;
+      if (humidity >= 50 && humidity <= 70) score += 1;
+      if (pressure >= 1010 && pressure <= 1020) score += 2;
+      const lc = condition.toLowerCase();
+      if (lc.includes("cloud") || lc.includes("overcast")) score += 2;
+      else if (lc.includes("partly")) score += 1;
+      else if (lc.includes("rain") || lc.includes("storm")) score -= 2;
+      
+      let fishingCondition = "Poor";
+      if (score >= 8) fishingCondition = "Excellent";
+      else if (score >= 5) fishingCondition = "Good";
+      else if (score >= 3) fishingCondition = "Fair";
+      
+      // Sunrise/sunset vary slightly
+      const sunriseHour = 6 + Math.floor(Math.random() * 2);
+      const sunriseMin = Math.floor(Math.random() * 60);
+      const sunsetHour = 17 + Math.floor(Math.random() * 2);
+      const sunsetMin = Math.floor(Math.random() * 60);
+      
+      forecasts.push({
+        temperature: temp,
+        feelsLike: temp + Math.floor(Math.random() * 6) - 3,
+        condition,
+        humidity,
+        windSpeed,
+        windDirection: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.floor(Math.random() * 8)],
+        fishingCondition,
+        uvIndex: Math.max(0, Math.min(11, todayWeather.uvIndex + Math.floor(Math.random() * 4) - 2)),
+        visibility: Math.max(1, Math.min(15, todayWeather.visibility + Math.floor(Math.random() * 4) - 2)),
+        pressure,
+        dewPoint: temp - 15 + Math.floor(Math.random() * 10),
+        cloudCover: condition.includes("Cloud") || condition.includes("Overcast") ? 50 + Math.floor(Math.random() * 50) : Math.floor(Math.random() * 40),
+        sunrise: `${sunriseHour}:${sunriseMin.toString().padStart(2, "0")} AM`,
+        sunset: `${sunsetHour - 12}:${sunsetMin.toString().padStart(2, "0")} PM`,
+        moonPhase,
+        airQuality: ["Good", "Good", "Moderate", "Good"][Math.floor(Math.random() * 4)],
+        airQualityIndex: 20 + Math.floor(Math.random() * 60),
+        waterTemp: temp - 12 + Math.floor(Math.random() * 8),
+        isLoading: false,
+        error: null,
+      });
+    }
+    
+    return forecasts;
+  }, []);
+
+  const handleDateChange = (date: Date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selected = new Date(date);
+    selected.setHours(0, 0, 0, 0);
+    const dayIndex = Math.round((selected.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    setSelectedDate(date);
+    setSelectedDayIndex(dayIndex);
+    
+    // Update displayed weather from forecast
+    if (forecast.length > dayIndex && dayIndex >= 0) {
+      setWeather(forecast[dayIndex]);
+    }
+  };
 
   const loadWeatherFor = useCallback(async (lat: number, lng: number, isCurrent: boolean) => {
     console.log("Loading weather for:", lat, lng, "isCurrent:", isCurrent);
@@ -610,14 +737,39 @@ export default function Home() {
     const [w, g] = await Promise.all([fetchGoogleWeather(lat, lng), reverseGeocodeGoogle(lat, lng)]);
     console.log("Weather result:", w.temperature, w.condition);
     console.log("Geocode result:", g.city, g.region);
+    
+    // Generate 7-day forecast based on today's weather
+    const weekForecast = generate7DayForecast(w);
+    setForecast(weekForecast);
+    
+    // Reset to today when loading new location
+    setSelectedDate(new Date());
+    setSelectedDayIndex(0);
     setWeather(w);
+    
     setLocation({ lat, lng, city: g.city || null, region: g.region || null, formattedAddress: g.formattedAddress || null, isLoading: false, isCurrentLocation: isCurrent });
-  }, []);
+  }, [generate7DayForecast]);
 
   const loadCurrentLoc = useCallback(async () => {
     console.log("Loading current location...");
     setWeather((p) => ({ ...p, isLoading: true }));
     setLocation((p) => ({ ...p, isLoading: true }));
+    
+    // Check for stored default location first
+    try {
+      const storedDefault = await AsyncStorage.getItem("defaultLocation");
+      if (storedDefault) {
+        const parsed = JSON.parse(storedDefault);
+        if (parsed.lat && parsed.lng) {
+          console.log("Using default location:", parsed.name);
+          setDefaultLocation(parsed);
+          await loadWeatherFor(parsed.lat, parsed.lng, false);
+          return;
+        }
+      }
+    } catch {}
+    
+    // Otherwise use current GPS location
     const { lat, lng } = await getCurrentLatLng();
     setDeviceLoc({ lat, lng });
     if (lat && lng) {
@@ -665,13 +817,33 @@ export default function Home() {
     setLocPickerOpen(false);
     setLocation((p) => ({ ...p, isLoading: true, formattedAddress: desc }));
     const coords = await getPlaceDetails(id);
-    if (coords) await loadWeatherFor(coords.lat, coords.lng, false);
+    if (coords) {
+      await loadWeatherFor(coords.lat, coords.lng, false);
+      // Ask if user wants to set as default
+      const locationName = desc.split(",")[0]; // Get city name
+      setPendingLocation({ lat: coords.lat, lng: coords.lng, name: locationName });
+      setSetDefaultPromptOpen(true);
+    }
   };
 
   const handleUseCurrent = async () => {
     setLocPickerOpen(false);
     if (deviceLoc.lat && deviceLoc.lng) await loadWeatherFor(deviceLoc.lat, deviceLoc.lng, true);
     else await loadCurrentLoc();
+  };
+
+  const handleSetDefaultConfirm = async () => {
+    if (pendingLocation) {
+      await saveDefaultLocation(pendingLocation);
+      Alert.alert("Default Set", `${pendingLocation.name} is now your default location.`);
+    }
+    setSetDefaultPromptOpen(false);
+    setPendingLocation(null);
+  };
+
+  const handleSetDefaultCancel = () => {
+    setSetDefaultPromptOpen(false);
+    setPendingLocation(null);
   };
 
   const pickAndUpload = async (useCamera: boolean) => {
@@ -723,8 +895,18 @@ export default function Home() {
     await updateLocalCatch(lastLocalId, { species_label: selectedSpecies });
     if (userId && lastRemoteId) { try { await fetch(`${API_BASE}/catches/${lastRemoteId}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-User-Id": userId }, body: JSON.stringify({ species_label: selectedSpecies }) }); } catch {} }
     setConfirmOpen(false);
+    
+    // Clear the preview section
+    const savedSpecies = selectedSpecies;
+    setLocalImageUri(null);
+    setServerImagePath(null);
+    setPrediction(null);
+    setSelectedSpecies(null);
+    setLastLocalId(null);
+    setLastRemoteId(null);
+    
     // Show regulations modal
-    showRegulations(selectedSpecies);
+    showRegulations(savedSpecies);
   };
 
   const previewUri = userId && serverImagePath ? bust(`${API_BASE}${serverImagePath}`) : localImageUri || undefined;
@@ -768,12 +950,36 @@ export default function Home() {
           </View>
         )}
 
-        <WeatherCard weather={weather} location={location} onLocationPress={() => setLocPickerOpen(true)} />
+        <WeatherCard weather={weather} location={location} onLocationPress={() => setLocPickerOpen(true)} selectedDate={selectedDate} onSelectDate={handleDateChange} />
         <FishSection title="In Season Now" icon="✨" colors={["#10b981", "#14b8a6"]} fish={IN_SEASON_FISH} onFishPress={setSelectedFish} columns={2} />
         <FishSection title="Common Fish in Your Area" icon="🌊" colors={["#06b6d4", "#3b82f6"]} fish={COMMON_FISH} onFishPress={setSelectedFish} columns={3} />
 
         <FishDetailModal fish={selectedFish} visible={!!selectedFish} onClose={() => setSelectedFish(null)} />
         <LocationPickerModal visible={locPickerOpen} onClose={() => setLocPickerOpen(false)} onSelect={handleSelectLoc} onUseCurrent={handleUseCurrent} currentName={deviceLocName} />
+
+        {/* Set Default Location Prompt */}
+        <Modal visible={setDefaultPromptOpen} transparent animationType="fade" onRequestClose={handleSetDefaultCancel}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.defaultLocPrompt}>
+              <Text style={styles.defaultLocIcon}>📍</Text>
+              <Text style={styles.defaultLocTitle}>Set as Default Location?</Text>
+              <Text style={styles.defaultLocDesc}>
+                Would you like to set {pendingLocation?.name || "this location"} as your default fishing location?
+              </Text>
+              <Text style={styles.defaultLocSubtext}>
+                The app will automatically load weather for this location when you open it.
+              </Text>
+              <View style={styles.defaultLocButtons}>
+                <TouchableOpacity style={styles.defaultLocBtnNo} onPress={handleSetDefaultCancel}>
+                  <Text style={styles.defaultLocBtnNoText}>No, thanks</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.defaultLocBtnYes} onPress={handleSetDefaultConfirm}>
+                  <Text style={styles.defaultLocBtnYesText}>Yes, set default</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         <Modal visible={confirmOpen} transparent animationType="slide" onRequestClose={() => setConfirmOpen(false)}>
           <View style={styles.modalOverlay}>
@@ -982,9 +1188,26 @@ const styles = StyleSheet.create({
   weatherCard: { backgroundColor: "white", borderRadius: 14, marginBottom: 10, overflow: "hidden", borderWidth: 1, borderColor: "#e5e7eb" },
   weatherHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 12, backgroundColor: "#f0fdff", borderBottomWidth: 1, borderBottomColor: "#e0f2fe" },
   weatherHeaderIcon: { fontSize: 18, marginRight: 6 },
-  weatherTitle: { fontSize: 14, fontWeight: "700", color: "#0e7490" },
+  weatherTitle: { fontSize: 13, fontWeight: "700", color: "#0e7490" },
   locBadge: { flexDirection: "row", alignItems: "center", backgroundColor: "#e0f2fe", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 16, maxWidth: 130 },
   locText: { fontSize: 10, fontWeight: "600", color: "#0369a1", marginHorizontal: 3, flexShrink: 1 },
+  
+  // Date Tab Selector
+  dateTabContainer: { maxHeight: 56, borderBottomWidth: 1, borderBottomColor: "#e5e7eb" },
+  dateTabContent: { paddingHorizontal: 8, paddingVertical: 8, gap: 6 },
+  dateTab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: "#f3f4f6", alignItems: "center", marginRight: 6 },
+  dateTabActive: { backgroundColor: "#0891b2" },
+  dateTabDay: { fontSize: 11, fontWeight: "600", color: "#6b7280" },
+  dateTabDayActive: { color: "white" },
+  dateTabDate: { fontSize: 9, color: "#9ca3af", marginTop: 1 },
+  dateTabDateActive: { color: "#e0f2fe" },
+  
+  // Forecast indicators
+  forecastBadge: { backgroundColor: "#dbeafe", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, marginLeft: 6 },
+  forecastBadgeText: { fontSize: 9, fontWeight: "600", color: "#2563eb" },
+  forecastNote: { backgroundColor: "#f0f9ff", paddingHorizontal: 12, paddingVertical: 6, marginHorizontal: 10, marginTop: 6, borderRadius: 8, borderWidth: 1, borderColor: "#bae6fd" },
+  forecastNoteText: { fontSize: 11, color: "#0369a1", textAlign: "center" },
+  
   errorBanner: { backgroundColor: "#fef3c7", paddingHorizontal: 10, paddingVertical: 4, marginHorizontal: 10, marginTop: 6, borderRadius: 6 },
   errorText: { fontSize: 10, color: "#92400e", textAlign: "center" },
   weatherPage: { padding: 10 },
@@ -1000,6 +1223,18 @@ const styles = StyleSheet.create({
   indicatorContainer: { flexDirection: "row", justifyContent: "center", paddingVertical: 8 },
   indicator: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#d1d5db", marginHorizontal: 3 },
   indicatorActive: { backgroundColor: "#0891b2", width: 18 },
+
+  // Default Location Prompt
+  defaultLocPrompt: { backgroundColor: "white", marginHorizontal: 24, borderRadius: 20, padding: 24, alignItems: "center", marginTop: "auto", marginBottom: "auto" },
+  defaultLocIcon: { fontSize: 48, marginBottom: 12 },
+  defaultLocTitle: { fontSize: 20, fontWeight: "700", color: "#1f2937", marginBottom: 8, textAlign: "center" },
+  defaultLocDesc: { fontSize: 15, color: "#4b5563", textAlign: "center", marginBottom: 8 },
+  defaultLocSubtext: { fontSize: 12, color: "#9ca3af", textAlign: "center", marginBottom: 20 },
+  defaultLocButtons: { flexDirection: "row", gap: 12, width: "100%" },
+  defaultLocBtnNo: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: "#f3f4f6", alignItems: "center" },
+  defaultLocBtnNoText: { fontSize: 14, fontWeight: "600", color: "#6b7280" },
+  defaultLocBtnYes: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: "#0891b2", alignItems: "center" },
+  defaultLocBtnYesText: { fontSize: 14, fontWeight: "600", color: "white" },
 
   sectionCard: { backgroundColor: "white", borderRadius: 14, marginBottom: 10, overflow: "hidden", borderWidth: 1, borderColor: "#e5e7eb" },
   sectionHeader: { flexDirection: "row", alignItems: "center", padding: 10 },
