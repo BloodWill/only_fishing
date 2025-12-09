@@ -36,14 +36,22 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 🔥 Explore tab removed */}
+      <Tabs.Screen
+        name="fishindex"
+        options={{
+          title: 'Fish Index',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={28} name="fish.fill" color={color} />
+          ),
+        }}
+      />
 
       <Tabs.Screen
-        name="history"
+        name="rank"
         options={{
-          title: 'History',
+          title: 'Rankings',
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="clock.fill" color={color} />
+            <IconSymbol size={28} name="trophy.fill" color={color} />
           ),
         }}
       />
@@ -51,26 +59,34 @@ export default function TabLayout() {
       <Tabs.Screen
         name="personal"
         options={{
-          title: 'Personal',
+          title: 'Account',
           tabBarIcon: ({ color }) => (
             <IconSymbol size={28} name="person.fill" color={color} />
           ),
         }}
       />
+
+      {/* Hidden tabs - these files exist but aren't shown in tab bar */}
       <Tabs.Screen
         name="map"
         options={{
-          title: 'Map',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="map.fill" color={color} />
-          ),
+          href: null, // Hidden from tab bar
         }}
       />
 
-  <Tabs.Screen name="rank" options={{ title: "Rank" }} />
+      <Tabs.Screen
+        name="history"
+        options={{
+          href: null, // Merged into fishindex
+        }}
+      />
 
-
-
+      <Tabs.Screen
+        name="dex"
+        options={{
+          href: null, // Merged into fishindex
+        }}
+      />
     </Tabs>
   );
 }

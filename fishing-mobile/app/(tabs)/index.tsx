@@ -34,7 +34,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ALL_FISH,
   IN_SEASON_FISH,
-  COMMON_FISH,
+  COMMON_AREA_FISH,
   FISHING_REGULATIONS,
   getActivityColor,
   getFishByName,
@@ -57,8 +57,8 @@ const WEATHER_ITEM_WIDTH = (SCREEN_WIDTH - PADDING * 2 - 20 - GAP) / 2;
 // ===========================================
 // GOOGLE API CONFIGURATION
 // ===========================================
-const GOOGLE_WEATHER_API_KEY = "AIzaSyC6LqO4UlawM9lsmm-FxncqWW4Hy7Nslhc";
-const GOOGLE_GEOCODING_API_KEY = "AIzaSyC6LqO4UlawM9lsmm-FxncqWW4Hy7Nslhc";
+const GOOGLE_WEATHER_API_KEY = "";
+const GOOGLE_GEOCODING_API_KEY = "";
 
 // Types
 type IdentifyResponse = {
@@ -157,9 +157,11 @@ async function getCurrentLatLng(): Promise<{ lat: number | null; lng: number | n
       console.log("Location permission denied");
       return { lat: null, lng: null };
     }
-    const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-    console.log("Got location:", pos.coords.latitude, pos.coords.longitude);
-    return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    
+    // Simple approach that works (same as map.tsx)
+    const loc = await Location.getCurrentPositionAsync({});
+    console.log("Got location:", loc.coords.latitude, loc.coords.longitude);
+    return { lat: loc.coords.latitude, lng: loc.coords.longitude };
   } catch (e) {
     console.error("Location error:", e);
     return { lat: null, lng: null };
@@ -489,7 +491,7 @@ function WeatherCard({ weather, location, onLocationPress, selectedDate, onSelec
             <View style={[styles.weatherItem, { borderColor: "#99f6e4" }]}><Text style={styles.wIcon}>🌊</Text><View><Text style={styles.wLabel}>Water Temp</Text><Text style={[styles.wValue, { color: "#0d9488" }]}>~{weather.waterTemp}°F</Text></View></View>
           </View>
           <View style={styles.weatherRow}>
-            <View style={[styles.weatherItem, { borderColor: "#d8b4fe" }]}><Text style={styles.wIcon}>🌙</Text><View><Text style={styles.wLabel}>Moon</Text><Text style={[styles.wValue, { color: "#9333ea" }]} numberOfLines={1}>{weather.moonPhase.split(" ")[1]}</Text></View></View>
+            <View style={[styles.weatherItem, { borderColor: "#d8b4fe" }]}><Text style={styles.wIcon}>🌙</Text><View><Text style={styles.wLabel}>Moon</Text><Text style={[styles.wValue, { color: "#9333ea" }]} numberOfLines={1}>{weather.moonPhase?.split(" ")[1] || "Unknown"}</Text></View></View>
             <View style={[styles.weatherItem, { borderColor: "#fed7aa" }]}><Text style={styles.wIcon}>☁️</Text><View><Text style={styles.wLabel}>Clouds</Text><Text style={[styles.wValue, { color: "#ea580c" }]}>{weather.cloudCover}%</Text></View></View>
           </View>
           <View style={styles.condRow}><Text style={styles.condLabel}>☀️ {weather.sunrise}</Text><Text style={styles.condValue}>🌙 {weather.sunset}</Text></View>
@@ -592,11 +594,14 @@ export default function Home() {
   const [lastLocalId, setLastLocalId] = useState<string | null>(null);
   const [lastRemoteId, setLastRemoteId] = useState<number | null>(null);
 
-  const [weather, setWeather] = useState<WeatherData>({
-    temperature: 0, feelsLike: 0, condition: "Loading...", humidity: 0, windSpeed: 0, windDirection: "N",
-    fishingCondition: "Loading...", uvIndex: 0, visibility: 10, pressure: 1013, dewPoint: 0, cloudCover: 0,
-    sunrise: "6:45 AM", sunset: "5:30 PM", moonPhase: getMoonPhase(), airQuality: "Good", airQualityIndex: 35, waterTemp: 55,
-    isLoading: true, error: null,
+  const [weather, setWeather] = useState<WeatherData>(() => {
+    const moonPhaseInfo = getMoonPhase();
+    return {
+      temperature: 0, feelsLike: 0, condition: "Loading...", humidity: 0, windSpeed: 0, windDirection: "N",
+      fishingCondition: "Loading...", uvIndex: 0, visibility: 10, pressure: 1013, dewPoint: 0, cloudCover: 0,
+      sunrise: "6:45 AM", sunset: "5:30 PM", moonPhase: `${moonPhaseInfo.icon} ${moonPhaseInfo.name}`, airQuality: "Good", airQualityIndex: 35, waterTemp: 55,
+      isLoading: true, error: null,
+    };
   });
   
   // Store 7-day forecast
@@ -778,10 +783,11 @@ export default function Home() {
       await loadWeatherFor(lat, lng, true);
     } else {
       console.log("No location available, using defaults");
+      const moonPhaseInfo = getMoonPhase();
       setWeather({
         temperature: 72, feelsLike: 70, condition: "Partly Cloudy", humidity: 65, windSpeed: 8, windDirection: "SW",
         fishingCondition: "Good", uvIndex: 4, visibility: 10, pressure: 1015, dewPoint: 55, cloudCover: 40,
-        sunrise: "6:45 AM", sunset: "5:30 PM", moonPhase: getMoonPhase(), airQuality: "Good", airQualityIndex: 35, waterTemp: 58,
+        sunrise: "6:45 AM", sunset: "5:30 PM", moonPhase: `${moonPhaseInfo.icon} ${moonPhaseInfo.name}`, airQuality: "Good", airQualityIndex: 35, waterTemp: 58,
         isLoading: false, error: "Location unavailable",
       });
       setLocation({ lat: null, lng: null, city: null, region: null, formattedAddress: null, isLoading: false, isCurrentLocation: false });
@@ -828,8 +834,44 @@ export default function Home() {
 
   const handleUseCurrent = async () => {
     setLocPickerOpen(false);
-    if (deviceLoc.lat && deviceLoc.lng) await loadWeatherFor(deviceLoc.lat, deviceLoc.lng, true);
-    else await loadCurrentLoc();
+    // Always get fresh GPS location (bypass default location and cached deviceLoc)
+    console.log("User requested current GPS location...");
+    setWeather((p) => ({ ...p, isLoading: true }));
+    setLocation((p) => ({ ...p, isLoading: true }));
+    
+    const { lat, lng } = await getCurrentLatLng();
+    if (lat && lng) {
+      setDeviceLoc({ lat, lng });
+      const g = await reverseGeocodeGoogle(lat, lng);
+      const locName = g.city && g.region ? `${g.city}, ${g.region}` : g.formattedAddress || "Current Location";
+      setDeviceLocName(locName);
+      console.log("Got GPS location:", locName);
+      await loadWeatherFor(lat, lng, true);
+    } else {
+      console.log("GPS location unavailable");
+      // GPS failed - show helpful error
+      Alert.alert(
+        "GPS Unavailable", 
+        "Could not get your current location.\n\n" +
+        "If using an emulator:\n" +
+        "• Click (...) on emulator toolbar\n" +
+        "• Go to Location tab\n" +
+        "• Set coordinates and click 'Set Location'\n\n" +
+        "If on a real device:\n" +
+        "• Enable Location Services in Settings\n" +
+        "• Try going outside or near a window",
+        [
+          { text: "OK", style: "cancel" },
+          { 
+            text: "Use Search Instead", 
+            onPress: () => setLocPickerOpen(true) 
+          }
+        ]
+      );
+      // Reset loading state but keep current weather
+      setWeather((p) => ({ ...p, isLoading: false }));
+      setLocation((p) => ({ ...p, isLoading: false }));
+    }
   };
 
   const handleSetDefaultConfirm = async () => {
@@ -952,7 +994,7 @@ export default function Home() {
 
         <WeatherCard weather={weather} location={location} onLocationPress={() => setLocPickerOpen(true)} selectedDate={selectedDate} onSelectDate={handleDateChange} />
         <FishSection title="In Season Now" icon="✨" colors={["#10b981", "#14b8a6"]} fish={IN_SEASON_FISH} onFishPress={setSelectedFish} columns={2} />
-        <FishSection title="Common Fish in Your Area" icon="🌊" colors={["#06b6d4", "#3b82f6"]} fish={COMMON_FISH} onFishPress={setSelectedFish} columns={3} />
+        <FishSection title="Common Fish in Your Area" icon="🌊" colors={["#06b6d4", "#3b82f6"]} fish={COMMON_AREA_FISH} onFishPress={setSelectedFish} columns={3} />
 
         <FishDetailModal fish={selectedFish} visible={!!selectedFish} onClose={() => setSelectedFish(null)} />
         <LocationPickerModal visible={locPickerOpen} onClose={() => setLocPickerOpen(false)} onSelect={handleSelectLoc} onUseCurrent={handleUseCurrent} currentName={deviceLocName} />
