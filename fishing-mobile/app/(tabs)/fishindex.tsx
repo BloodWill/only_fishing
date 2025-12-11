@@ -18,7 +18,7 @@ import {
 import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { API_BASE } from "../../config";
+import { API_BASE } from "@/lib/config"; //
 import { getLocalCatches, removeLocalCatch, LocalCatch } from "@/lib/storage";
 import { getUserId } from "@/lib/user";
 import { syncPending } from "@/lib/sync";

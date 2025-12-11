@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ActivityIndicator, Platform, StyleSheet } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import * as Location from "expo-location";
-import { API_BASE, bust } from "../../config";
+import { API_BASE, bust } from "@/lib/config";
 import { getLocalCatches } from "@/lib/storage";
 import { getUserId } from "@/lib/user";
 

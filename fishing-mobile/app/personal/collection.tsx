@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, Image, ActivityIndicator } from "react-native";
 import { useFocusEffect } from "expo-router";
-import { API_BASE, bust } from "../../config";
+import { API_BASE, bust } from "@/lib/config";
 import { getLocalCatches } from "@/lib/storage";
 import { getUserId } from "@/lib/user";
 import { syncPending } from "@/lib/sync";

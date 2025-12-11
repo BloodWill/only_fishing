@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { View, Text, Image, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { API_BASE } from "../../../config"; // adjust if your config path differs
+import { API_BASE, bust } from "@/lib/config"; // adjust if your config path differs
 import { getLocalCatches, removeLocalCatch } from "@/lib/storage";
 import { getUserId } from "@/lib/user";
 import { Platform } from "react-native";

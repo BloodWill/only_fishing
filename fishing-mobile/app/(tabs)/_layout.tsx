@@ -73,20 +73,16 @@ export default function TabLayout() {
           href: null, // Hidden from tab bar
         }}
       />
-
-      <Tabs.Screen
-        name="history"
+      {/* <Tabs.Screen
+        name="map"
         options={{
-          href: null, // Merged into fishindex
+          title: 'Map',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={28} name="map.fill" color={color} />
+          ),
         }}
-      />
+      /> */}
 
-      <Tabs.Screen
-        name="dex"
-        options={{
-          href: null, // Merged into fishindex
-        }}
-      />
     </Tabs>
   );
 }

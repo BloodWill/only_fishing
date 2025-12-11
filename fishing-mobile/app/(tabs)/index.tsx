@@ -1,4 +1,13 @@
 // app/(tabs)/index.tsx
+// ===========================================
+// HOME SCREEN - FULLY UPDATED WITH FIXES
+// ===========================================
+// Changes applied:
+// 1. ✅ Removed hardcoded API keys
+// 2. ✅ Import keys from centralized config
+// 3. ✅ Proper error handling with fallbacks
+// 4. ✅ Better console logging for debugging
+
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   View,
@@ -16,8 +25,6 @@ import {
   StatusBar,
   Keyboard,
   RefreshControl,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
@@ -25,10 +32,20 @@ import * as FileSystem from "expo-file-system";
 import * as Location from "expo-location";
 import { useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { API_BASE, bust } from "../../config";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// ===========================================
+// ✅ FIXED: Import from centralized config
+// ===========================================
+import {
+  API_BASE,
+  GOOGLE_WEATHER_KEY,
+  GOOGLE_GEOCODING_KEY,
+  bust,
+} from "@/lib/config";
+
 import { addLocalCatch, updateLocalCatch, LocalCatch } from "@/lib/storage";
 import { getUserId } from "@/lib/user";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Import constants from centralized location
 import {
@@ -55,10 +72,13 @@ const GAP = 8;
 const WEATHER_ITEM_WIDTH = (SCREEN_WIDTH - PADDING * 2 - 20 - GAP) / 2;
 
 // ===========================================
-// GOOGLE API CONFIGURATION
+// ✅ REMOVED: Hardcoded API keys
 // ===========================================
-const GOOGLE_WEATHER_API_KEY = "";
-const GOOGLE_GEOCODING_API_KEY = "";
+// OLD CODE (DELETED):
+// const GOOGLE_WEATHER_API_KEY = "";
+// const GOOGLE_GEOCODING_API_KEY = "";
+//
+// Keys now come from config.ts via environment variables
 
 // Types
 type IdentifyResponse = {
@@ -158,7 +178,6 @@ async function getCurrentLatLng(): Promise<{ lat: number | null; lng: number | n
       return { lat: null, lng: null };
     }
     
-    // Simple approach that works (same as map.tsx)
     const loc = await Location.getCurrentPositionAsync({});
     console.log("Got location:", loc.coords.latitude, loc.coords.longitude);
     return { lat: loc.coords.latitude, lng: loc.coords.longitude };
@@ -169,10 +188,11 @@ async function getCurrentLatLng(): Promise<{ lat: number | null; lng: number | n
 }
 
 // ===========================================
-// GEOCODING FUNCTIONS
+// ✅ FIXED: GEOCODING FUNCTIONS - Use config keys
 // ===========================================
 async function reverseGeocodeGoogle(lat: number, lng: number): Promise<Partial<LocationData>> {
-  const apiKey = GOOGLE_GEOCODING_API_KEY || GOOGLE_WEATHER_API_KEY;
+  // ✅ Use centralized API key from config
+  const apiKey = GOOGLE_GEOCODING_KEY || GOOGLE_WEATHER_KEY;
   
   // Always try Expo's built-in geocoding first (no API key needed)
   try {
@@ -214,7 +234,8 @@ async function reverseGeocodeGoogle(lat: number, lng: number): Promise<Partial<L
 }
 
 async function searchPlaces(query: string): Promise<PlacePrediction[]> {
-  const apiKey = GOOGLE_GEOCODING_API_KEY || GOOGLE_WEATHER_API_KEY;
+  // ✅ Use centralized API key from config
+  const apiKey = GOOGLE_GEOCODING_KEY || GOOGLE_WEATHER_KEY;
   if (!apiKey || query.trim().length < 2) return [];
   try {
     const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&types=(cities)&key=${apiKey}`;
@@ -226,7 +247,8 @@ async function searchPlaces(query: string): Promise<PlacePrediction[]> {
 }
 
 async function getPlaceDetails(placeId: string): Promise<{ lat: number; lng: number } | null> {
-  const apiKey = GOOGLE_GEOCODING_API_KEY || GOOGLE_WEATHER_API_KEY;
+  // ✅ Use centralized API key from config
+  const apiKey = GOOGLE_GEOCODING_KEY || GOOGLE_WEATHER_KEY;
   if (!apiKey) return null;
   try {
     const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry&key=${apiKey}`;
@@ -238,7 +260,7 @@ async function getPlaceDetails(placeId: string): Promise<{ lat: number; lng: num
 }
 
 // ===========================================
-// WEATHER API FETCH
+// ✅ FIXED: WEATHER API FETCH - Use config key
 // ===========================================
 async function fetchGoogleWeather(lat: number, lng: number): Promise<WeatherData> {
   const moonPhaseInfo = getMoonPhase();
@@ -250,14 +272,17 @@ async function fetchGoogleWeather(lat: number, lng: number): Promise<WeatherData
     isLoading: false, error: null,
   };
 
-  if (!GOOGLE_WEATHER_API_KEY) {
-    console.log("No weather API key, using demo data");
-    return { ...base, error: "Set API key for live weather" };
+  // ✅ Use centralized API key from config
+  if (!GOOGLE_WEATHER_KEY) {
+    console.log("No weather API key configured, using demo data");
+    console.log("To enable live weather, set EXPO_PUBLIC_GOOGLE_WEATHER_KEY in your .env file");
+    return { ...base, error: "Set EXPO_PUBLIC_GOOGLE_WEATHER_KEY in .env for live weather" };
   }
 
   try {
-    const url = `https://weather.googleapis.com/v1/currentConditions:lookup?key=${GOOGLE_WEATHER_API_KEY}&location.latitude=${lat}&location.longitude=${lng}&unitsSystem=IMPERIAL`;
-    console.log("Fetching weather from:", url);
+    // ✅ Use centralized API key from config
+    const url = `https://weather.googleapis.com/v1/currentConditions:lookup?key=${GOOGLE_WEATHER_KEY}&location.latitude=${lat}&location.longitude=${lng}&unitsSystem=IMPERIAL`;
+    console.log("Fetching weather...");
     const res = await fetch(url);
     
     if (!res.ok) {
@@ -267,7 +292,7 @@ async function fetchGoogleWeather(lat: number, lng: number): Promise<WeatherData
     }
 
     const data: GoogleWeatherResponse = await res.json();
-    console.log("Weather data received:", JSON.stringify(data).substring(0, 500));
+    console.log("Weather data received");
     
     const current = data.currentConditions || data;
     if (!current?.temperature?.degrees) throw new Error("Invalid response");
@@ -637,19 +662,17 @@ export default function Home() {
   // Generate 7-day forecast based on today's weather
   const generate7DayForecast = useCallback((todayWeather: WeatherData): WeatherData[] => {
     const conditions = ["Sunny", "Partly Cloudy", "Cloudy", "Light Rain", "Overcast", "Clear", "Scattered Clouds"];
-    const forecasts: WeatherData[] = [todayWeather]; // Day 0 is today's actual weather
+    const forecasts: WeatherData[] = [todayWeather];
     
     for (let i = 1; i < 7; i++) {
-      // Create variation for each day
-      const tempVariation = Math.floor(Math.random() * 16) - 8; // -8 to +8 degrees
-      const humidityVariation = Math.floor(Math.random() * 20) - 10; // -10 to +10%
-      const windVariation = Math.floor(Math.random() * 10) - 5; // -5 to +5 mph
+      const tempVariation = Math.floor(Math.random() * 16) - 8;
+      const humidityVariation = Math.floor(Math.random() * 20) - 10;
+      const windVariation = Math.floor(Math.random() * 10) - 5;
       const condition = conditions[Math.floor(Math.random() * conditions.length)];
       
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + i);
       
-      // Calculate moon phase for future date
       const c = Math.floor(365.25 * futureDate.getFullYear()) + Math.floor(30.6 * (futureDate.getMonth() + 1)) + futureDate.getDate() - 694039.09;
       const p = (c / 29.53) % 1;
       let moonPhase = "🌑 New";
@@ -666,7 +689,6 @@ export default function Home() {
       const windSpeed = Math.max(0, todayWeather.windSpeed + windVariation);
       const pressure = todayWeather.pressure + Math.floor(Math.random() * 10) - 5;
       
-      // Calculate fishing condition for this day
       let score = 0;
       if (temp >= 60 && temp <= 75) score += 3;
       else if (temp >= 50 && temp <= 85) score += 2;
@@ -686,7 +708,6 @@ export default function Home() {
       else if (score >= 5) fishingCondition = "Good";
       else if (score >= 3) fishingCondition = "Fair";
       
-      // Sunrise/sunset vary slightly
       const sunriseHour = 6 + Math.floor(Math.random() * 2);
       const sunriseMin = Math.floor(Math.random() * 60);
       const sunsetHour = 17 + Math.floor(Math.random() * 2);
@@ -729,7 +750,6 @@ export default function Home() {
     setSelectedDate(date);
     setSelectedDayIndex(dayIndex);
     
-    // Update displayed weather from forecast
     if (forecast.length > dayIndex && dayIndex >= 0) {
       setWeather(forecast[dayIndex]);
     }
@@ -743,11 +763,9 @@ export default function Home() {
     console.log("Weather result:", w.temperature, w.condition);
     console.log("Geocode result:", g.city, g.region);
     
-    // Generate 7-day forecast based on today's weather
     const weekForecast = generate7DayForecast(w);
     setForecast(weekForecast);
     
-    // Reset to today when loading new location
     setSelectedDate(new Date());
     setSelectedDayIndex(0);
     setWeather(w);
@@ -760,7 +778,6 @@ export default function Home() {
     setWeather((p) => ({ ...p, isLoading: true }));
     setLocation((p) => ({ ...p, isLoading: true }));
     
-    // Check for stored default location first
     try {
       const storedDefault = await AsyncStorage.getItem("defaultLocation");
       if (storedDefault) {
@@ -774,7 +791,6 @@ export default function Home() {
       }
     } catch {}
     
-    // Otherwise use current GPS location
     const { lat, lng } = await getCurrentLatLng();
     setDeviceLoc({ lat, lng });
     if (lat && lng) {
@@ -810,7 +826,10 @@ export default function Home() {
     let alive = true;
     (async () => {
       setSpeciesLoading(true);
-      try { const r = await fetch(`${API_BASE}/species`); if (r.ok && alive) setSpecies(dedupeMerge(await r.json(), FALLBACK_SPECIES)); }
+      try { 
+        const r = await fetch(`${API_BASE}/species`); 
+        if (r.ok && alive) setSpecies(dedupeMerge(await r.json(), FALLBACK_SPECIES)); 
+      }
       catch { if (alive) setSpecies(FALLBACK_SPECIES); }
       finally { if (alive) setSpeciesLoading(false); }
     })();
@@ -825,8 +844,7 @@ export default function Home() {
     const coords = await getPlaceDetails(id);
     if (coords) {
       await loadWeatherFor(coords.lat, coords.lng, false);
-      // Ask if user wants to set as default
-      const locationName = desc.split(",")[0]; // Get city name
+      const locationName = desc.split(",")[0];
       setPendingLocation({ lat: coords.lat, lng: coords.lng, name: locationName });
       setSetDefaultPromptOpen(true);
     }
@@ -834,7 +852,6 @@ export default function Home() {
 
   const handleUseCurrent = async () => {
     setLocPickerOpen(false);
-    // Always get fresh GPS location (bypass default location and cached deviceLoc)
     console.log("User requested current GPS location...");
     setWeather((p) => ({ ...p, isLoading: true }));
     setLocation((p) => ({ ...p, isLoading: true }));
@@ -849,7 +866,6 @@ export default function Home() {
       await loadWeatherFor(lat, lng, true);
     } else {
       console.log("GPS location unavailable");
-      // GPS failed - show helpful error
       Alert.alert(
         "GPS Unavailable", 
         "Could not get your current location.\n\n" +
@@ -862,13 +878,9 @@ export default function Home() {
         "• Try going outside or near a window",
         [
           { text: "OK", style: "cancel" },
-          { 
-            text: "Use Search Instead", 
-            onPress: () => setLocPickerOpen(true) 
-          }
+          { text: "Use Search Instead", onPress: () => setLocPickerOpen(true) }
         ]
       );
-      // Reset loading state but keep current weather
       setWeather((p) => ({ ...p, isLoading: false }));
       setLocation((p) => ({ ...p, isLoading: false }));
     }
@@ -938,7 +950,6 @@ export default function Home() {
     if (userId && lastRemoteId) { try { await fetch(`${API_BASE}/catches/${lastRemoteId}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-User-Id": userId }, body: JSON.stringify({ species_label: selectedSpecies }) }); } catch {} }
     setConfirmOpen(false);
     
-    // Clear the preview section
     const savedSpecies = selectedSpecies;
     setLocalImageUri(null);
     setServerImagePath(null);
@@ -947,7 +958,6 @@ export default function Home() {
     setLastLocalId(null);
     setLastRemoteId(null);
     
-    // Show regulations modal
     showRegulations(savedSpecies);
   };
 
@@ -1031,7 +1041,6 @@ export default function Home() {
                 <TouchableOpacity onPress={() => setConfirmOpen(false)} style={styles.closeX}><Text style={styles.closeXText}>✕</Text></TouchableOpacity>
               </View>
               
-              {/* Model Prediction Section */}
               {prediction && (
                 <View style={styles.predictionSection}>
                   <Text style={styles.predictionHeader}>🤖 AI Prediction</Text>
@@ -1048,7 +1057,6 @@ export default function Home() {
                 </View>
               )}
 
-              {/* Manual Selection Section */}
               <View style={styles.manualSection}>
                 <Text style={styles.manualHeader}>🔍 Or select manually</Text>
                 <TextInput placeholder="Search species..." value={query} onChangeText={setQuery} style={styles.speciesInput} />
@@ -1234,7 +1242,6 @@ const styles = StyleSheet.create({
   locBadge: { flexDirection: "row", alignItems: "center", backgroundColor: "#e0f2fe", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 16, maxWidth: 130 },
   locText: { fontSize: 10, fontWeight: "600", color: "#0369a1", marginHorizontal: 3, flexShrink: 1 },
   
-  // Date Tab Selector
   dateTabContainer: { maxHeight: 56, borderBottomWidth: 1, borderBottomColor: "#e5e7eb" },
   dateTabContent: { paddingHorizontal: 8, paddingVertical: 8, gap: 6 },
   dateTab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: "#f3f4f6", alignItems: "center", marginRight: 6 },
@@ -1244,7 +1251,6 @@ const styles = StyleSheet.create({
   dateTabDate: { fontSize: 9, color: "#9ca3af", marginTop: 1 },
   dateTabDateActive: { color: "#e0f2fe" },
   
-  // Forecast indicators
   forecastBadge: { backgroundColor: "#dbeafe", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, marginLeft: 6 },
   forecastBadgeText: { fontSize: 9, fontWeight: "600", color: "#2563eb" },
   forecastNote: { backgroundColor: "#f0f9ff", paddingHorizontal: 12, paddingVertical: 6, marginHorizontal: 10, marginTop: 6, borderRadius: 8, borderWidth: 1, borderColor: "#bae6fd" },
@@ -1266,7 +1272,6 @@ const styles = StyleSheet.create({
   indicator: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#d1d5db", marginHorizontal: 3 },
   indicatorActive: { backgroundColor: "#0891b2", width: 18 },
 
-  // Default Location Prompt
   defaultLocPrompt: { backgroundColor: "white", marginHorizontal: 24, borderRadius: 20, padding: 24, alignItems: "center", marginTop: "auto", marginBottom: "auto" },
   defaultLocIcon: { fontSize: 48, marginBottom: 12 },
   defaultLocTitle: { fontSize: 20, fontWeight: "700", color: "#1f2937", marginBottom: 8, textAlign: "center" },

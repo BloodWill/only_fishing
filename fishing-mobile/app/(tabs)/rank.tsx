@@ -12,7 +12,7 @@ import {
   Dimensions,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { API_BASE } from "../../config";
+import { API_BASE, bust } from "@/lib/config";
 import { getUserId } from "@/lib/user";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
