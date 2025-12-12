@@ -52,11 +52,15 @@ export default {
       enableCrashReporting: process.env.EXPO_PUBLIC_ENABLE_CRASH_REPORTING === 'true',
       enableAnalytics: process.env.EXPO_PUBLIC_ENABLE_ANALYTICS === 'true',
       
+      //sentry
+      sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN ?? '',
+      enableCrashReporting: process.env.EXPO_PUBLIC_ENABLE_CRASH_REPORTING === 'true',
       // EAS configuration
       eas: {
         projectId: process.env.EAS_PROJECT_ID ?? '',
       },
     },
+
 
     ios: {
       bundleIdentifier: IOS_BUNDLE_ID,

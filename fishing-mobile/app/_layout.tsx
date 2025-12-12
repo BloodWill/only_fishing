@@ -1,5 +1,5 @@
 // app/_layout.tsx
-// Root layout with ErrorBoundary to catch crashes app-wide
+// Root layout with ErrorBoundary and Sentry crash reporting
 
 import 'react-native-reanimated'; // MUST be first import
 
@@ -11,6 +11,12 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { initSentry } from '@/lib/sentry';
+
+// ===========================================
+// ✅ INITIALIZE SENTRY (runs once at startup)
+// ===========================================
+initSentry();
 
 // Loading screen while fonts load
 function LoadingScreen() {
@@ -20,35 +26,6 @@ function LoadingScreen() {
       <Text style={styles.loadingText}>Loading FishDex...</Text>
     </View>
   );
-}
-
-// Global error handler for crash reporting
-function handleGlobalError(error: Error, errorInfo: React.ErrorInfo) {
-  // Log to console in development
-  if (__DEV__) {
-    console.error('Global error caught:', error.message);
-  }
-
-  // TODO: Send to your crash reporting service
-  // Examples:
-  //
-  // Sentry:
-  // import * as Sentry from '@sentry/react-native';
-  // Sentry.captureException(error, {
-  //   extra: { componentStack: errorInfo.componentStack }
-  // });
-  //
-  // Firebase Crashlytics:
-  // import crashlytics from '@react-native-firebase/crashlytics';
-  // crashlytics().recordError(error);
-  //
-  // For now, we could store errors locally for later review:
-  // AsyncStorage.setItem('@crash_log', JSON.stringify({
-  //   error: error.message,
-  //   stack: error.stack,
-  //   componentStack: errorInfo.componentStack,
-  //   timestamp: new Date().toISOString(),
-  // }));
 }
 
 export default function RootLayout() {
@@ -69,7 +46,7 @@ export default function RootLayout() {
   }
 
   return (
-    <ErrorBoundary onError={handleGlobalError}>
+    <ErrorBoundary>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(tabs)" />

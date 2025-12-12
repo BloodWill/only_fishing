@@ -1,5 +1,5 @@
 // fishing-mobile/lib/api.ts
-import { API_BASE } from "../config";
+import { API_BASE, bust } from "@/lib/config";
 
 export type TopKItem = {
   species_id: string;

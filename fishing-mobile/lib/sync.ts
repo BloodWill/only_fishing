@@ -1,5 +1,5 @@
 import { getLocalCatches, updateLocalCatch, LocalCatch } from "./storage";
-import { API_BASE } from "@/config";
+import { API_BASE, bust } from "@/lib/config";
 import * as FileSystem from "expo-file-system";
 
 let syncing = false;

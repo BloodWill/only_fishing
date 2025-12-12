@@ -1,4 +1,4 @@
-// config.ts
+// lib/config.ts
 // ===========================================
 // CENTRALIZED APP CONFIGURATION
 // ===========================================
@@ -15,6 +15,7 @@ interface AppConfig {
   apiUrl: string;
   googleWeatherKey: string;
   googleGeocodingKey: string;
+  sentryDsn: string;
   enableCrashReporting: boolean;
   enableAnalytics: boolean;
 }
@@ -67,6 +68,11 @@ export const GOOGLE_WEATHER_KEY: string = extra?.googleWeatherKey || '';
 export const GOOGLE_GEOCODING_KEY: string = extra?.googleGeocodingKey || '';
 
 /**
+ * Sentry DSN for crash reporting
+ */
+export const SENTRY_DSN: string = extra?.sentryDsn || '';
+
+/**
  * Feature flags
  */
 export const ENABLE_CRASH_REPORTING: boolean = extra?.enableCrashReporting ?? false;
@@ -114,6 +120,13 @@ export const checkApiKeys = (): { valid: boolean; missing: string[] } => {
   };
 };
 
+/**
+ * Check if Sentry is configured
+ */
+export const isSentryConfigured = (): boolean => {
+  return !!SENTRY_DSN && SENTRY_DSN.startsWith('https://');
+};
+
 // ===========================================
 // DEVELOPMENT LOGGING
 // ===========================================
@@ -123,6 +136,7 @@ if (__DEV__) {
   console.log(`   API_BASE: ${API_BASE}`);
   console.log(`   Weather API: ${GOOGLE_WEATHER_KEY ? '✅ Configured' : '❌ Missing'}`);
   console.log(`   Geocoding API: ${GOOGLE_GEOCODING_KEY ? '✅ Configured' : '❌ Missing'}`);
+  console.log(`   Sentry: ${isSentryConfigured() ? '✅ Configured' : '⚪ Not configured'}`);
   console.log(`   Crash Reporting: ${ENABLE_CRASH_REPORTING ? '✅ Enabled' : '⚪ Disabled'}`);
   console.log(`   Analytics: ${ENABLE_ANALYTICS ? '✅ Enabled' : '⚪ Disabled'}`);
 }
@@ -135,9 +149,11 @@ export default {
   API_BASE,
   GOOGLE_WEATHER_KEY,
   GOOGLE_GEOCODING_KEY,
+  SENTRY_DSN,
   ENABLE_CRASH_REPORTING,
   ENABLE_ANALYTICS,
   bust,
   apiUrl,
   checkApiKeys,
+  isSentryConfigured,
 };
