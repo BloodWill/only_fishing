@@ -901,6 +901,7 @@ export default function Home() {
   };
 
   const pickAndUpload = async (useCamera: boolean) => {
+    console.log("🔍 API_BASE is:", API_BASE); 
     setPrediction(null); setServerImagePath(null); setLocalImageUri(null); setLastLocalId(null); setLastRemoteId(null); setSelectedSpecies(null); setQuery("");
     
     let res;

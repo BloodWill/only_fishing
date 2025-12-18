@@ -67,13 +67,14 @@ export default function TabLayout() {
       />
 
       {/* Hidden tabs - these files exist but aren't shown in tab bar */}
-      <Tabs.Screen
+      {/* <Tabs.Screen
         name="map"
         options={{
           href: null, // Hidden from tab bar
-        }}
-      />
-      {/* <Tabs.Screen
+        }} */}
+      
+
+      { <Tabs.Screen
         name="map"
         options={{
           title: 'Map',
@@ -81,7 +82,7 @@ export default function TabLayout() {
             <IconSymbol size={28} name="map.fill" color={color} />
           ),
         }}
-      /> */}
+      /> }
 
     </Tabs>
   );
