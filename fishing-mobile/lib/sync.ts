@@ -1,82 +1,71 @@
-import { getLocalCatches, updateLocalCatch, LocalCatch } from "./storage";
-import { API_BASE, bust } from "@/lib/config";
-import * as FileSystem from "expo-file-system";
+// lib/sync.ts
+// Updated with JWT authentication
 
-let syncing = false;
+import { API_BASE } from "@/lib/config";
+import { getLocalCatches, updateLocalCatch, LocalCatch } from "@/lib/storage";
+import { supabase } from "@/lib/supabase";
 
-function guessMime(uri: string) {
-  const u = uri.toLowerCase();
-  if (u.endsWith(".png")) return "image/png";
-  if (u.endsWith(".webp")) return "image/webp";
-  return "image/jpeg";
-}
-function fileNameFromUri(uri: string) {
-  const m = uri.split("/").pop();
-  return m || `photo_${Date.now()}.jpg`;
-}
-async function exists(uri: string) {
+/**
+ * Get auth headers for API requests
+ */
+async function getAuthHeaders(): Promise<Record<string, string>> {
   try {
-    const info = await FileSystem.getInfoAsync(uri);
-    return !!info.exists;
-  } catch { return false; }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      return { Authorization: `Bearer ${session.access_token}` };
+    }
+  } catch {}
+  return {};
 }
 
-async function uploadOne(c: LocalCatch, userId: string) {
-  if (!(await exists(c.local_uri))) {
-    console.warn("sync: file missing", c.local_uri);
-    return;
-  }
+/**
+ * Sync pending local catches to the server
+ * Now uses JWT auth instead of X-User-Id header
+ */
+export async function syncPending(userId: string): Promise<void> {
+  if (!userId) return;
 
-  const form = new FormData();
-  form.append("file", { uri: c.local_uri, name: fileNameFromUri(c.local_uri), type: guessMime(c.local_uri) } as any);
-  form.append("user_id", userId);
-  form.append("persist", "true");
+  const locals = await getLocalCatches();
+  const pending = locals.filter((c) => !c.synced && !c.remote_id);
 
-  const resp = await fetch(`${API_BASE}/fish/identify`, {
-    method: "POST",
-    body: form,
-    headers: { Accept: "application/json" },
-  });
-  if (!resp.ok) throw new Error(`identify upload failed: HTTP ${resp.status}`);
-  const json = (await resp.json()) as {
-    catch_id?: number | null;
-    prediction?: { label?: string | null } | null;
-  };
+  for (const local of pending) {
+    try {
+      const form = new FormData();
+      form.append("file", {
+        uri: local.local_uri,
+        name: `catch-${Date.now()}.jpg`,
+        type: "image/jpeg",
+      } as unknown as Blob);
 
-  const remoteId = json.catch_id ?? null;
-  const predicted = json?.prediction?.label ?? null;
+      if (local.species_label) form.append("species_label", local.species_label);
+      if (typeof local.species_confidence === "number") {
+        form.append("species_confidence", String(local.species_confidence));
+      }
+      if (local.lat) form.append("latitude", String(local.lat));
+      if (local.lng) form.append("longitude", String(local.lng));
+      form.append("persist", "true");
 
-  // If local label differs from model guess, patch server to match local
-  if (remoteId && predicted && predicted !== c.species_label) {
-    const body = JSON.stringify({ species_label: c.species_label });
-    let r = await fetch(`${API_BASE}/catches/${remoteId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", "X-User-Id": userId },
-      body,
-    });
-    if (r.status === 405) {
-      r = await fetch(`${API_BASE}/catches/${remoteId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "X-User-Id": userId },
-        body,
+      // ✅ Use JWT auth header instead of X-User-Id
+      const authHeaders = await getAuthHeaders();
+      
+      const resp = await fetch(`${API_BASE}/fish/identify`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...authHeaders,
+        },
+        body: form,
       });
-    }
-    if (!r.ok) throw new Error(`label patch failed: HTTP ${r.status}`);
-  }
 
-  await updateLocalCatch(c.local_id, { remote_id: remoteId ?? undefined, synced: !!remoteId });
-}
-
-export async function syncPending(userId: string) {
-  if (syncing) return;
-  syncing = true;
-  try {
-    const locals = await getLocalCatches();
-    const pending = locals.filter((c) => !c.synced);
-    for (const c of pending) {
-      try { await uploadOne(c, userId); } catch (e) { console.warn("sync failed", c.local_id, e); }
+      if (resp.ok) {
+        const data = await resp.json();
+        await updateLocalCatch(local.local_id, {
+          synced: true,
+          remote_id: data.catch_id,
+        });
+      }
+    } catch (e) {
+      console.warn("Sync failed for", local.local_id, e);
     }
-  } finally {
-    syncing = false;
   }
 }

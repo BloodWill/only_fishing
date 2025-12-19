@@ -1,5 +1,5 @@
 // app/(tabs)/fishindex.tsx
-import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import React, { useCallback, useRef, useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -13,14 +13,21 @@ import {
   Modal,
   Dimensions,
 } from "react-native";
+// ✅ 优化 1: 恢复使用 expo-image 进行高性能图片加载
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
+
+// Config & Libs
 import { API_BASE, bust } from "@/lib/config";
 import { getLocalCatches, removeLocalCatch, LocalCatch } from "@/lib/storage";
-import { getUserId } from "@/lib/user";
 import { syncPending } from "@/lib/sync";
+
+// ✅ 优化 2: 使用新的 Auth Hook 和 API Helpers
+import { useAuth } from "@/contexts/AuthContext";
+import { getCatches, deleteCatch as apiDeleteCatch } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 
 import {
   ALL_FISH,
@@ -92,8 +99,19 @@ const dedupeByKey = (rows: CatchRead[]) => {
   return out;
 };
 
+// 获取 JWT Auth Header
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      return { Authorization: `Bearer ${session.access_token}` };
+    }
+  } catch {}
+  return {};
+}
+
 // ============================================
-// MEMOIZED SUB-COMPONENTS (PERFORMANCE OPTIMIZATION)
+// MEMOIZED SUB-COMPONENTS (优化 3: 恢复 React.memo)
 // ============================================
 
 // 1. Collection Item (Grid Card)
@@ -155,6 +173,7 @@ const HistoryItem = React.memo(({
   onDelete: (item: CatchRead) => void;
   onUpload: (item: CatchRead) => void;
 }) => {
+  // 处理图片缓存 URL
   const uri = item.image_path.startsWith("file://") 
     ? item.image_path 
     : bust(`${API_BASE}${item.image_path}`);
@@ -166,6 +185,7 @@ const HistoryItem = React.memo(({
       onLongPress={() => onDelete(item)}
       activeOpacity={0.9}
     >
+      {/* ✅ 使用 expo-image 获得更好的性能 */}
       <Image 
         source={{ uri }} 
         style={styles.historyImage} 
@@ -222,8 +242,11 @@ const HistoryItem = React.memo(({
 export default function FishIndex() {
   const router = useRouter();
   
-  // Auth & Data State
-  const [userId, setUserId] = useState<string | null>(null);
+  // ✅ Auth: 使用 Context 而不是手动 fetch
+  const { user } = useAuth();
+  const userId = user?.id || null;
+  
+  // UI State
   const [activeTab, setActiveTab] = useState<"collection" | "history" | "badges">("collection");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -243,17 +266,6 @@ export default function FishIndex() {
   // ============================================
   // DATA LOADING
   // ============================================
-  
-  useFocusEffect(
-    useCallback(() => {
-      let alive = true;
-      (async () => {
-        const id = await getUserId();
-        if (alive) setUserId(id);
-      })();
-      return () => { alive = false; };
-    }, [])
-  );
 
   const loadData = useCallback(async () => {
     if (loadingRef.current) return;
@@ -265,11 +277,11 @@ export default function FishIndex() {
       let allCatches: CatchRead[] = [];
 
       if (userId) {
+        // ✅ API: 使用新的 getCatches helper
         try {
-          const res = await fetch(`${API_BASE}/catches?limit=200&user_id=${encodeURIComponent(userId)}&t=${Date.now()}`);
-          const remoteRaw: any[] = await res.json();
+          const remoteRaw = await getCatches(200);
           
-          const remote: CatchRead[] = remoteRaw.map((r) => ({
+          const remote: CatchRead[] = remoteRaw.map((r: any) => ({
             id: Number(r.id),
             image_path: String(r.image_path ?? ""),
             species_label: String(r.species_label ?? "Unknown"),
@@ -280,6 +292,7 @@ export default function FishIndex() {
 
           const remoteIds = new Set(remote.map((r) => r.id));
 
+          // 合并逻辑：排除已经同步的本地数据
           const unsynced: CatchRead[] = locals
             .filter((l) => {
               if (l.remote_id && remoteIds.has(Number(l.remote_id))) return false;
@@ -303,6 +316,7 @@ export default function FishIndex() {
           console.warn("Failed to fetch remote catches", e);
         }
       } else {
+        // 只有本地数据模式
         allCatches = locals.map((l, idx) => ({
           id: -200000 - idx,
           image_path: String(l.local_uri),
@@ -318,6 +332,7 @@ export default function FishIndex() {
 
       setCatchHistory(dedupeByKey(allCatches));
 
+      // 更新已捕获鱼种集合
       const caught = new Set<string>();
       for (const c of allCatches) {
         const label = c.species_label?.trim();
@@ -337,6 +352,7 @@ export default function FishIndex() {
     }
   }, [userId]);
 
+  // Load on focus with sync
   useFocusEffect(
     useCallback(() => {
       (async () => {
@@ -401,17 +417,11 @@ export default function FishIndex() {
           onPress: async () => {
             setCatchHistory((prev) => prev.filter((c) => !(c._local !== true && c.id === item.id)));
             try {
-              const resp = await fetch(`${API_BASE}/catches/${item.id}`, {
-                method: "DELETE",
-                headers: userId ? { "X-User-Id": userId } : undefined,
-              });
-              if (!resp.ok) {
-                setCatchHistory((prev) => dedupeByKey([...prev, item]));
-                Alert.alert("Delete failed", "Please try again.");
-              }
-            } catch {
+              // ✅ API: 使用安全的 deleteCatch helper
+              await apiDeleteCatch(item.id);
+            } catch (e: any) {
               setCatchHistory((prev) => dedupeByKey([...prev, item]));
-              Alert.alert("Delete failed", "Check your network.");
+              Alert.alert("Delete failed", e?.message || "Please try again.");
             }
           },
         },
@@ -441,9 +451,11 @@ export default function FishIndex() {
         }
         form.append("created_at", item.created_at);
 
+        // ✅ Auth: 使用 Bearer Token 进行上传
+        const authHeaders = await getAuthHeaders();
         const resp = await fetch(`${API_BASE}/catches`, {
           method: "POST",
-          headers: { Accept: "application/json", "X-User-Id": userId },
+          headers: { Accept: "application/json", ...authHeaders },
           body: form,
         });
         if (!resp.ok) throw new Error(`Upload failed (${resp.status})`);
@@ -514,8 +526,9 @@ export default function FishIndex() {
   const progressPercent = (caughtCount / totalFish) * 100;
 
   // ============================================
-  // RENDER CALLBACKS
+  // RENDER CALLBACKS (连接到 React.memo 组件)
   // ============================================
+  
   const renderCollectionItem = useCallback(({ item }: { item: FishData }) => (
     <CollectionItem 
       item={item} 
@@ -664,6 +677,7 @@ export default function FishIndex() {
             renderItem={renderCollectionItem}
             contentContainerStyle={styles.fishGrid}
             showsVerticalScrollIndicator={false}
+            // ✅ 优化: 列表性能配置
             getItemLayout={(data, index) => ({
               length: 120,
               offset: 120 * (index / 3),
@@ -756,7 +770,7 @@ export default function FishIndex() {
 }
 
 // ============================================
-// STYLES
+// STYLES (保持一致)
 // ============================================
 const styles = StyleSheet.create({
   container: {

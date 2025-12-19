@@ -37,7 +37,11 @@ import { useLocation, type LocationData } from "@/hooks/useLocation";
 import { useWeather, type WeatherData } from "@/hooks/useWeather";
 
 import { addLocalCatch, updateLocalCatch, LocalCatch } from "@/lib/storage";
-import { getUserId } from "@/lib/user";
+//import { getUserId } from "@/lib/user";
+
+import { useAuth } from "@/contexts/AuthContext";
+import { identifyFish, getAuthHeaders } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 
 // ✅ 引入常量和数据
 import {
@@ -370,7 +374,9 @@ export default function Home() {
   } = useWeather();
 
   // Local state for UI only
-  const [userId, setUserId] = useState<string | null>(null);
+  //const [userId, setUserId] = useState<string | null>(null);
+  const { user } = useAuth();
+  const userId = user?.id || null;
   const [uploading, setUploading] = useState(false);
   const [selectedFish, setSelectedFish] = useState<FishData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -423,7 +429,7 @@ export default function Home() {
   }, []); // Run once
 
   // Auth
-  useFocusEffect(useCallback(() => { getUserId().then(setUserId); }, []));
+  //useFocusEffect(useCallback(() => { getUserId().then(setUserId); }, []));
 
   // Load Species List
   useEffect(() => {
@@ -548,17 +554,24 @@ export default function Home() {
     const uri = await copyToPersistent(asset.uri);
     setLocalImageUri(uri);
     
+    /*
     const form = new FormData();
     form.append("file", { uri, name: uri.split("/").pop() || "photo.jpg", type: asset.mimeType || "image/jpeg" } as any);
     form.append("persist", String(!!userId));
-    if (userId) form.append("user_id", userId);
+    //if (userId) form.append("user_id", userId);
     if (lat && lng) { form.append("latitude", String(lat)); form.append("longitude", String(lng)); }
-    
+    */
     setUploading(true);
     try {
-      const r = await fetch(`${API_BASE}/fish/identify`, { method: "POST", body: form, headers: { Accept: "application/json" } });
-      if (!r.ok) throw new Error(`${r.status}`);
-      const j: IdentifyResponse = await r.json();
+      //const r = await fetch(`${API_BASE}/fish/identify`, { method: "POST", body: form, headers: { Accept: "application/json" } });
+      //if (!r.ok) throw new Error(`${r.status}`);
+      //const j: IdentifyResponse = await r.json();
+
+      const j = await identifyFish(uri, {
+        persist: !!userId,
+        latitude: lat,
+        longitude: lng,
+      });
       
       setServerImagePath(j.saved_path ?? null);
       setPrediction(j.prediction || null);
@@ -577,7 +590,8 @@ export default function Home() {
   const saveLabel = async () => {
     if (!lastLocalId || !selectedSpecies) { setConfirmOpen(false); return; }
     await updateLocalCatch(lastLocalId, { species_label: selectedSpecies });
-    if (userId && lastRemoteId) { try { await fetch(`${API_BASE}/catches/${lastRemoteId}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-User-Id": userId }, body: JSON.stringify({ species_label: selectedSpecies }) }); } catch {} }
+    const authHeaders = await getAuthHeaders();
+    if (userId && lastRemoteId) { try { await fetch(`${API_BASE}/catches/${lastRemoteId}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders }, body: JSON.stringify({ species_label: selectedSpecies }) }); } catch {} }
     setConfirmOpen(false);
     
     const savedSpecies = selectedSpecies;

@@ -1,4 +1,5 @@
 // app/(tabs)/map.tsx
+// Updated with JWT authentication
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, Platform, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE, UrlTile, Callout } from "react-native-maps";
@@ -6,24 +7,24 @@ import * as Location from "expo-location";
 import { useRouter } from "expo-router"; 
 import { Ionicons } from "@expo/vector-icons"; 
 import { API_BASE } from "@/lib/config";
-import { getUserId } from "@/lib/user";
 import { getLocalCatches } from "@/lib/storage";
+// ✅ NEW: Import auth hook and API helper
+import { useAuth } from "@/contexts/AuthContext";
+import { getCatches } from "@/lib/api";
 
 // ==========================================
 // CONFIG
 // ==========================================
 
-// 📍 测试点：波士顿港外海 (这里等深线非常密集)
+// 📍 Default region: Boston Harbor
 const BOSTON_REGION = {
   latitude: 42.33,
-  longitude: -70.95, // 稍微往海里挪一点，避开复杂的港口建筑
-  latitudeDelta: 0.15, // 👁️ 关键调整：拉远一点视角，确保海图瓦片能加载出来
+  longitude: -70.95,
+  latitudeDelta: 0.15,
   longitudeDelta: 0.15,
 };
 
-// 🌊 核心修复：ArcGIS World Navigation Charts
-// 这是一个无缝拼接的航海图源，比原始 NOAA 源更稳定
-// 它包含：等深线 (Lines)、水深数字 (Numbers)、航标
+// 🌊 ArcGIS World Navigation Charts
 const TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/Specialty/World_Navigation_Charts/MapServer/tile/{z}/{y}/{x}";
 
 type Catch = {
@@ -41,15 +42,17 @@ export default function MapScreen() {
   const router = useRouter();
   const mapRef = useRef<MapView>(null);
   
-  const [userId, setUserId] = useState<string | null>(null);
+  // ✅ NEW: Use auth context instead of getUserId
+  const { user } = useAuth();
+  const userId = user?.id || null;
+  
   const [markers, setMarkers] = useState<Catch[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [showLayer, setShowLayer] = useState(true);
   const [legendOpen, setLegendOpen] = useState(true);
 
-  useEffect(() => { getUserId().then(setUserId); }, []);
-  
+  // Get current location and animate to it
   useEffect(() => {
     (async () => {
       try {
@@ -70,6 +73,7 @@ export default function MapScreen() {
     })();
   }, []);
 
+  // Load catches with JWT auth
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -77,12 +81,16 @@ export default function MapScreen() {
       try {
         const locals = await getLocalCatches();
         let remotes: Catch[] = [];
+        
         if (userId) {
           try {
-            const res = await fetch(`${API_BASE}/catches?limit=500&user_id=${encodeURIComponent(userId)}`);
-            if (res.ok) remotes = await res.json();
-          } catch (e) {}
+            // ✅ NEW: Use authenticated API helper
+            remotes = await getCatches(500);
+          } catch (e) {
+            console.warn("Failed to fetch catches for map", e);
+          }
         }
+        
         const all: Catch[] = [...remotes, ...locals];
         const validMarkers = all
           .map(c => ({...c, lat: Number(c.lat), lng: Number(c.lng)}))
@@ -112,18 +120,15 @@ export default function MapScreen() {
         initialRegion={BOSTON_REGION}
         showsUserLocation
         showsMyLocationButton={false}
-        // 💡 关键：改回 standard 模式
-        // 因为这张海图本身就是黄色的陆地，叠加在卫星图上会变脏。
-        // 在 standard 模式下，它会像一张纸质地图一样清晰地铺在上面。
         mapType="standard" 
       >
-        {/* ✅ 海图层 */}
+        {/* Nautical Chart Layer */}
         {showLayer && (
           <UrlTile
             urlTemplate={TILE_URL}
-            maximumZ={16}  // ArcGIS 这个图源超过 16 级会模糊或消失，限制一下
+            maximumZ={16}
             zIndex={100}   
-            opacity={0.8}  // 提高不透明度，确保你能看清线条
+            opacity={0.8}
             tileSize={256}
           />
         )}
@@ -150,7 +155,6 @@ export default function MapScreen() {
         <TouchableOpacity 
           style={[styles.btn, { backgroundColor: "#f59e0b" }]}
           onPress={() => {
-            // 动画飞到波士顿，并设置一个合适的缩放级别
             mapRef.current?.animateToRegion(BOSTON_REGION, 2000);
             setShowLayer(true);
           }}
@@ -237,7 +241,7 @@ export default function MapScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" }, // 背景改白
+  container: { flex: 1, backgroundColor: "#fff" },
   map: { flex: 1 },
   
   controls: { position: "absolute", top: 60, right: 16, alignItems: 'flex-end', gap: 10 },
