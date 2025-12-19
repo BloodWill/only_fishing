@@ -1,5 +1,5 @@
 // app/(tabs)/personal.tsx
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -10,22 +10,16 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from "react-native";
-import { useFocusEffect, Link } from "expo-router";
+import { useFocusEffect, Link, router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { getUserId, setUserId, clearUserId } from "@/lib/user";
+import { useAuth } from "../../contexts/AuthContext";
 import { syncPending } from "@/lib/sync";
 
 export default function AccountScreen() {
-  // Auth state
-  const [currentId, setCurrentId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Form state for login
-  const [input, setInput] = useState("");
-
+  const { user, loading, signOut } = useAuth();
+  
   // Profile form state (when logged in)
   const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
   // Password reset state
@@ -34,70 +28,23 @@ export default function AccountScreen() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  // Load user on mount and focus
+  // Sync catches when screen is focused (if logged in)
   useFocusEffect(
     useCallback(() => {
-      let alive = true;
-      (async () => {
-        setLoading(true);
-        const id = await getUserId();
-        if (alive) {
-          setCurrentId(id);
-          setInput(id ?? "");
-          // Set demo profile data if logged in
-          if (id) {
-            setDisplayName("Angler Pro");
-            setEmail(`${id}@example.com`);
-            setPhone("");
-          }
-          setLoading(false);
-        }
-      })();
-      return () => {
-        alive = false;
-      };
-    }, [])
+      if (user?.id) {
+        syncPending(user.id).catch(console.warn);
+      }
+    }, [user?.id])
   );
 
-  const onSignIn = async () => {
-    const id = input.trim();
-    if (!id) {
-      Alert.alert("Enter an ID", "Use any unique username or email.");
-      return;
-    }
-    await setUserId(id);
-    setCurrentId(id);
-    setDisplayName("Angler Pro");
-    setEmail(`${id}@example.com`);
-    Alert.alert("Signed in", `Welcome, ${id}!`);
-    syncPending(id);
-  };
-
-  const onGuest = async () => {
-    const id = `guest-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    setInput(id);
-    await setUserId(id);
-    setCurrentId(id);
-    setDisplayName("Guest Angler");
-    setEmail(`${id}@example.com`);
-    Alert.alert("Guest mode", "You're signed in as a guest. Your catches will sync online.");
-    syncPending(id);
-  };
-
-  const onSignOut = async () => {
+  const handleSignOut = async () => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Sign Out",
         style: "destructive",
         onPress: async () => {
-          await clearUserId();
-          setCurrentId(null);
-          setInput("");
-          setDisplayName("");
-          setEmail("");
-          setPhone("");
-          setShowPasswordReset(false);
+          await signOut();
         },
       },
     ]);
@@ -135,7 +82,7 @@ export default function AccountScreen() {
   // ============================================
   // LOCKED STATE (Not logged in)
   // ============================================
-  if (!currentId) {
+  if (!user) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.card}>
@@ -160,33 +107,20 @@ export default function AccountScreen() {
               Please sign in to access your account settings and sync your catches online.
             </Text>
 
-            {/* Sign In Form */}
-            <View style={styles.loginForm}>
-              <TextInput
-                placeholder="Enter user ID (email/username)"
-                value={input}
-                onChangeText={setInput}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.loginInput}
-                placeholderTextColor="#9ca3af"
-              />
-
-              <TouchableOpacity style={styles.loginBtn} onPress={onSignIn}>
-                <LinearGradient
-                  colors={["#06b6d4", "#3b82f6"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.loginBtnGradient}
-                >
-                  <Text style={styles.loginBtnText}>Sign In</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.guestBtn} onPress={onGuest}>
-                <Text style={styles.guestBtnText}>Continue as Guest</Text>
-              </TouchableOpacity>
-            </View>
+            {/* Sign In Button - navigates to login screen */}
+            <TouchableOpacity 
+              style={styles.loginBtn} 
+              onPress={() => router.push('/login')}
+            >
+              <LinearGradient
+                colors={["#06b6d4", "#3b82f6"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.loginBtnGradient}
+              >
+                <Text style={styles.loginBtnText}>Sign In</Text>
+              </LinearGradient>
+            </TouchableOpacity>
 
             {/* Info */}
             <View style={styles.infoBox}>
@@ -240,7 +174,7 @@ export default function AccountScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>User ID</Text>
               <View style={[styles.inputReadonly]}>
-                <Text style={styles.inputReadonlyText}>{currentId}</Text>
+                <Text style={styles.inputReadonlyText}>{user.id.slice(0, 24)}...</Text>
               </View>
             </View>
 
@@ -265,15 +199,18 @@ export default function AccountScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email Address</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Enter email"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                placeholderTextColor="#9ca3af"
-              />
+              <View style={styles.inputReadonly}>
+                <Text style={styles.inputReadonlyText}>{user.email}</Text>
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Provider</Text>
+              <View style={styles.inputReadonly}>
+                <Text style={styles.inputReadonlyText}>
+                  {user.app_metadata?.provider || 'email'}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -424,7 +361,7 @@ export default function AccountScreen() {
               <Text style={styles.saveBtnText}>Save Changes</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.logoutBtn} onPress={onSignOut}>
+            <TouchableOpacity style={styles.logoutBtn} onPress={handleSignOut}>
               <Text style={styles.logoutBtnText}>Sign Out</Text>
             </TouchableOpacity>
           </View>
@@ -514,25 +451,12 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  // Login Form
-  loginForm: {
-    width: "100%",
-    marginBottom: 20,
-  },
-  loginInput: {
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    backgroundColor: "#f9fafb",
-    marginBottom: 12,
-  },
+  // Login Button
   loginBtn: {
     borderRadius: 10,
     overflow: "hidden",
-    marginBottom: 10,
+    marginBottom: 20,
+    width: "100%",
   },
   loginBtnGradient: {
     paddingVertical: 14,
@@ -542,18 +466,6 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "700",
-  },
-  guestBtn: {
-    paddingVertical: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 10,
-  },
-  guestBtnText: {
-    color: "#6b7280",
-    fontSize: 15,
-    fontWeight: "600",
   },
 
   // Info Box

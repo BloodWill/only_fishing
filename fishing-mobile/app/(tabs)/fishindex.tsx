@@ -1,24 +1,23 @@
 // app/(tabs)/fishindex.tsx
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   View,
   Text,
   FlatList,
-  Image,
   TouchableOpacity,
   Alert,
   ActivityIndicator,
   RefreshControl,
   TextInput,
-  ScrollView,
   StyleSheet,
   Modal,
   Dimensions,
 } from "react-native";
+import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { API_BASE } from "@/lib/config"; //
+import { API_BASE, bust } from "@/lib/config";
 import { getLocalCatches, removeLocalCatch, LocalCatch } from "@/lib/storage";
 import { getUserId } from "@/lib/user";
 import { syncPending } from "@/lib/sync";
@@ -29,7 +28,6 @@ import {
   FishData,
   getRarityColor,
   getRarityBgColor,
-  slugifyFishName,
   findFish,
 } from "@/constants/fishData";
 
@@ -81,8 +79,6 @@ const BADGES: Badge[] = [
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
-const bust = (url: string) => (url.includes("?") ? `${url}&t=${Date.now()}` : `${url}?t=${Date.now()}`);
-
 const dedupeByKey = (rows: CatchRead[]) => {
   const seen = new Set<string>();
   const out: CatchRead[] = [];
@@ -95,6 +91,130 @@ const dedupeByKey = (rows: CatchRead[]) => {
   }
   return out;
 };
+
+// ============================================
+// MEMOIZED SUB-COMPONENTS (PERFORMANCE OPTIMIZATION)
+// ============================================
+
+// 1. Collection Item (Grid Card)
+const CollectionItem = React.memo(({ 
+  item, 
+  isCaught, 
+  onMark 
+}: { 
+  item: FishData; 
+  isCaught: boolean; 
+  onMark: (f: FishData) => void;
+}) => {
+  return (
+    <View style={styles.fishCard}>
+      <View style={[styles.fishIconContainer, { backgroundColor: isCaught ? getRarityBgColor(item.rarity) : "#f3f4f6" }]}>
+        {isCaught ? (
+          <Text style={styles.fishCheckmark}>✓</Text>
+        ) : (
+          <Text style={styles.fishLockIcon}>🔒</Text>
+        )}
+      </View>
+      
+      <Text style={[styles.fishName, !isCaught && styles.fishNameLocked]} numberOfLines={1}>
+        {item.name}
+      </Text>
+      
+      <View style={[styles.rarityBadge, { backgroundColor: getRarityColor(item.rarity) }]}>
+        <Text style={styles.rarityText}>{item.rarity}</Text>
+      </View>
+      
+      <Text style={styles.pointsText}>{item.points} pts</Text>
+      
+      {!isCaught && (
+        <TouchableOpacity
+          style={styles.markButton}
+          onPress={() => onMark(item)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.markButtonText}>Mark</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}, (prev, next) => prev.isCaught === next.isCaught && prev.item.id === next.item.id);
+
+// 2. History Item (List Row)
+const HistoryItem = React.memo(({ 
+  item, 
+  userId,
+  uploading,
+  onOpen,
+  onDelete,
+  onUpload
+}: { 
+  item: CatchRead; 
+  userId: string | null;
+  uploading: boolean;
+  onOpen: (id: number, isLocal?: boolean, localId?: string) => void;
+  onDelete: (item: CatchRead) => void;
+  onUpload: (item: CatchRead) => void;
+}) => {
+  const uri = item.image_path.startsWith("file://") 
+    ? item.image_path 
+    : bust(`${API_BASE}${item.image_path}`);
+
+  return (
+    <TouchableOpacity
+      style={styles.historyItem}
+      onPress={() => onOpen(item.id, item._local, item._local_id)}
+      onLongPress={() => onDelete(item)}
+      activeOpacity={0.9}
+    >
+      <Image 
+        source={{ uri }} 
+        style={styles.historyImage} 
+        contentFit="cover"
+        transition={300}
+        cachePolicy="disk"
+      />
+      
+      <View style={styles.historyInfo}>
+        <View style={styles.historyHeader}>
+          <Text style={styles.historySpecies} numberOfLines={1}>
+            {item.species_label || "Unknown"}
+          </Text>
+          <View style={[styles.historyBadge, { backgroundColor: item._local ? "#FFF5E5" : "#E6FFEE" }]}>
+            <Text style={[styles.historyBadgeText, { color: item._local ? "#C76B00" : "#16794D" }]}>
+              {item._local ? "Local" : "Online"}
+            </Text>
+          </View>
+        </View>
+        
+        <Text style={styles.historyDate}>
+          {new Date(item.created_at).toLocaleDateString()}
+        </Text>
+        
+        <Text style={styles.historyConfidence}>
+          {(item.species_confidence * 100).toFixed(1)}% confidence
+        </Text>
+      </View>
+
+      {item._local && userId ? (
+        <TouchableOpacity
+          onPress={() => onUpload(item)}
+          disabled={uploading}
+          style={[styles.uploadButton, uploading && styles.uploadButtonDisabled]}
+        >
+          {uploading ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.uploadButtonText}>Upload</Text>
+          )}
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity onPress={() => onDelete(item)} style={styles.deleteButton}>
+          <Text style={styles.deleteButtonText}>Delete</Text>
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
+  );
+});
 
 // ============================================
 // MAIN COMPONENT
@@ -124,7 +244,6 @@ export default function FishIndex() {
   // DATA LOADING
   // ============================================
   
-  // Load user ID on focus
   useFocusEffect(
     useCallback(() => {
       let alive = true;
@@ -136,7 +255,6 @@ export default function FishIndex() {
     }, [])
   );
 
-  // Load catches and build collection
   const loadData = useCallback(async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
@@ -147,7 +265,6 @@ export default function FishIndex() {
       let allCatches: CatchRead[] = [];
 
       if (userId) {
-        // Fetch remote catches
         try {
           const res = await fetch(`${API_BASE}/catches?limit=200&user_id=${encodeURIComponent(userId)}&t=${Date.now()}`);
           const remoteRaw: any[] = await res.json();
@@ -163,7 +280,6 @@ export default function FishIndex() {
 
           const remoteIds = new Set(remote.map((r) => r.id));
 
-          // Add unsynced local catches
           const unsynced: CatchRead[] = locals
             .filter((l) => {
               if (l.remote_id && remoteIds.has(Number(l.remote_id))) return false;
@@ -187,7 +303,6 @@ export default function FishIndex() {
           console.warn("Failed to fetch remote catches", e);
         }
       } else {
-        // Local only mode
         allCatches = locals.map((l, idx) => ({
           id: -200000 - idx,
           image_path: String(l.local_uri),
@@ -203,12 +318,10 @@ export default function FishIndex() {
 
       setCatchHistory(dedupeByKey(allCatches));
 
-      // Build caught species set
       const caught = new Set<string>();
       for (const c of allCatches) {
         const label = c.species_label?.trim();
         if (!label) continue;
-        // Use findFish helper for flexible matching
         const fish = findFish(label);
         if (fish) {
           caught.add(fish.id);
@@ -224,7 +337,6 @@ export default function FishIndex() {
     }
   }, [userId]);
 
-  // Load on focus with sync
   useFocusEffect(
     useCallback(() => {
       (async () => {
@@ -236,7 +348,6 @@ export default function FishIndex() {
     }, [userId, loadData])
   );
 
-  // Pull to refresh
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -349,9 +460,6 @@ export default function FishIndex() {
     [userId, loadData]
   );
 
-  // ============================================
-  // COLLECTION: Mark fish as caught
-  // ============================================
   const markFishCaught = useCallback((fish: FishData) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Alert.alert(
@@ -391,116 +499,43 @@ export default function FishIndex() {
   }, [caughtSpecies, catchHistory]);
 
   // ============================================
-  // FILTERED DATA
+  // MEMOIZED DATA
   // ============================================
-  const filteredFish = ALL_FISH.filter((fish) => {
-    const matchesSearch = fish.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRarity = rarityFilter === "all" || fish.rarity === rarityFilter;
-    return matchesSearch && matchesRarity;
-  });
+  const filteredFish = useMemo(() => {
+    return ALL_FISH.filter((fish) => {
+      const matchesSearch = fish.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesRarity = rarityFilter === "all" || fish.rarity === rarityFilter;
+      return matchesSearch && matchesRarity;
+    });
+  }, [searchQuery, rarityFilter]);
 
   const totalFish = TOTAL_FISH_COUNT;
   const caughtCount = caughtSpecies.size;
   const progressPercent = (caughtCount / totalFish) * 100;
 
   // ============================================
-  // RENDER FUNCTIONS
+  // RENDER CALLBACKS
   // ============================================
+  const renderCollectionItem = useCallback(({ item }: { item: FishData }) => (
+    <CollectionItem 
+      item={item} 
+      isCaught={caughtSpecies.has(item.id)} 
+      onMark={markFishCaught} 
+    />
+  ), [caughtSpecies, markFishCaught]);
 
-  const renderCollectionItem = ({ item }: { item: FishData }) => {
-    const isCaught = caughtSpecies.has(item.id);
-    
-    return (
-      <View style={styles.fishCard}>
-        <View style={[styles.fishIconContainer, { backgroundColor: isCaught ? getRarityBgColor(item.rarity) : "#f3f4f6" }]}>
-          {isCaught ? (
-            <Text style={styles.fishCheckmark}>✓</Text>
-          ) : (
-            <Text style={styles.fishLockIcon}>🔒</Text>
-          )}
-        </View>
-        
-        <Text style={[styles.fishName, !isCaught && styles.fishNameLocked]} numberOfLines={1}>
-          {item.name}
-        </Text>
-        
-        <View style={[styles.rarityBadge, { backgroundColor: getRarityColor(item.rarity) }]}>
-          <Text style={styles.rarityText}>{item.rarity}</Text>
-        </View>
-        
-        <Text style={styles.pointsText}>{item.points} pts</Text>
-        
-        {!isCaught && (
-          <TouchableOpacity
-            style={styles.markButton}
-            onPress={() => markFishCaught(item)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.markButtonText}>Mark</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  };
+  const renderHistoryItem = useCallback(({ item }: { item: CatchRead }) => (
+    <HistoryItem 
+      item={item}
+      userId={userId}
+      uploading={Boolean(item._local_id && uploadingLocalId === item._local_id)}
+      onOpen={openDetail}
+      onDelete={confirmDelete}
+      onUpload={uploadLocal}
+    />
+  ), [userId, uploadingLocalId, openDetail, confirmDelete, uploadLocal]);
 
-  const renderHistoryItem = ({ item }: { item: CatchRead }) => {
-    const uri = item.image_path.startsWith("file://") 
-      ? item.image_path 
-      : bust(`${API_BASE}${item.image_path}`);
-    const uploading = Boolean(item._local_id && uploadingLocalId === item._local_id);
-
-    return (
-      <TouchableOpacity
-        style={styles.historyItem}
-        onPress={() => openDetail(item.id, item._local, item._local_id)}
-        onLongPress={() => confirmDelete(item)}
-        activeOpacity={0.9}
-      >
-        <Image source={{ uri }} style={styles.historyImage} />
-        
-        <View style={styles.historyInfo}>
-          <View style={styles.historyHeader}>
-            <Text style={styles.historySpecies} numberOfLines={1}>
-              {item.species_label || "Unknown"}
-            </Text>
-            <View style={[styles.historyBadge, { backgroundColor: item._local ? "#FFF5E5" : "#E6FFEE" }]}>
-              <Text style={[styles.historyBadgeText, { color: item._local ? "#C76B00" : "#16794D" }]}>
-                {item._local ? "Local" : "Online"}
-              </Text>
-            </View>
-          </View>
-          
-          <Text style={styles.historyDate}>
-            {new Date(item.created_at).toLocaleDateString()}
-          </Text>
-          
-          <Text style={styles.historyConfidence}>
-            {(item.species_confidence * 100).toFixed(1)}% confidence
-          </Text>
-        </View>
-
-        {item._local && userId ? (
-          <TouchableOpacity
-            onPress={() => uploadLocal(item)}
-            disabled={uploading}
-            style={[styles.uploadButton, uploading && styles.uploadButtonDisabled]}
-          >
-            {uploading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.uploadButtonText}>Upload</Text>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity onPress={() => confirmDelete(item)} style={styles.deleteButton}>
-            <Text style={styles.deleteButtonText}>Delete</Text>
-          </TouchableOpacity>
-        )}
-      </TouchableOpacity>
-    );
-  };
-
-  const renderBadgeItem = ({ item }: { item: Badge }) => {
+  const renderBadgeItem = useCallback(({ item }: { item: Badge }) => {
     const { unlocked, current } = getBadgeProgress(item);
     
     return (
@@ -532,7 +567,7 @@ export default function FishIndex() {
         )}
       </View>
     );
-  };
+  }, [getBadgeProgress]);
 
   // ============================================
   // MAIN RENDER
@@ -629,6 +664,14 @@ export default function FishIndex() {
             renderItem={renderCollectionItem}
             contentContainerStyle={styles.fishGrid}
             showsVerticalScrollIndicator={false}
+            getItemLayout={(data, index) => ({
+              length: 120,
+              offset: 120 * (index / 3),
+              index,
+            })}
+            initialNumToRender={12}
+            maxToRenderPerBatch={12}
+            windowSize={5}
             refreshControl={
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0891b2" />
             }
@@ -643,6 +686,8 @@ export default function FishIndex() {
           renderItem={renderHistoryItem}
           contentContainerStyle={styles.historyList}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          removeClippedSubviews={true}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0891b2" />
           }

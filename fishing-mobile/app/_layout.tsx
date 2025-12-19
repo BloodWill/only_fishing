@@ -1,5 +1,5 @@
 // app/_layout.tsx
-// Root layout with ErrorBoundary and Sentry crash reporting
+// Root layout with ErrorBoundary, Sentry crash reporting, and AuthProvider
 
 import 'react-native-reanimated'; // MUST be first import
 
@@ -12,6 +12,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { initSentry } from '@/lib/sentry';
+import { AuthProvider } from '../contexts/AuthContext';
 
 // ===========================================
 // ✅ INITIALIZE SENTRY (runs once at startup)
@@ -47,13 +48,16 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="+not-found" />
-        </Stack>
-        <StatusBar style="auto" />
-      </ThemeProvider>
+      <AuthProvider>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="login" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="+not-found" />
+          </Stack>
+          <StatusBar style="auto" />
+        </ThemeProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
