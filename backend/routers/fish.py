@@ -1,4 +1,6 @@
 # backend/routers/fish.py
+# Updated with JWT authentication support
+
 from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Form
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -8,7 +10,9 @@ from typing import Optional
 
 from backend.database import get_db
 from backend import models
-from ml import predict  # keeping your import as-is
+from backend.storage import upload_image
+from backend.auth import AuthenticatedUser, get_current_user, get_optional_user
+from ml import predict
 
 router = APIRouter()
 
@@ -17,10 +21,12 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_BYTES = 6 * 1024 * 1024  # 6 MB
+
+# Local storage fallback (used if Supabase not configured)
 SAVE_DIR = os.path.join("assets", "uploads")
 os.makedirs(SAVE_DIR, exist_ok=True)
-
 EXT_FOR = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+
 
 async def fetch_weather(lat: float, lng: float) -> Optional[dict]:
     """Minimal current-conditions snapshot via Open-Meteo."""
@@ -39,15 +45,36 @@ async def fetch_weather(lat: float, lng: float) -> Optional[dict]:
         logger.warning("weather fetch failed: %s", e)
     return None
 
+
+def save_image_local(contents: bytes, content_type: str) -> str:
+    """Fallback: save image to local disk"""
+    uid = uuid.uuid4().hex
+    ext = EXT_FOR[content_type]
+    filename = uid + ext
+    rel_path = f"/assets/uploads/{filename}"
+    abs_path = os.path.join(SAVE_DIR, filename)
+    with open(abs_path, "wb") as f:
+        f.write(contents)
+    logger.info("Saved upload locally: %s", abs_path)
+    return rel_path
+
+
 @router.post("/identify")
 async def identify_fish(
     file: UploadFile = File(...),
-    user_id: Optional[str] = Form(None),    # optional login
-    persist: bool = Form(True),             # allow client to skip server persistence
+    persist: bool = Form(True),
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
     db: Session = Depends(get_db),
+    user: Optional[AuthenticatedUser] = Depends(get_optional_user),
 ):
+    """
+    Identify a fish from an uploaded image.
+    
+    - If authenticated: saves catch to user's account
+    - If not authenticated: returns prediction only (no persistence)
+    - Set persist=false to skip saving even when authenticated
+    """
     # Basic validation
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(
@@ -66,6 +93,9 @@ async def identify_fish(
     label = (result.get("label") or "Unknown").strip()
     conf = float(result.get("confidence") or 0.0)
 
+    # Get user_id from authenticated user (or None for guests)
+    user_id = user.id if user else None
+
     # If not logged-in or client asked not to persist: don't save to DB/disk
     if not user_id or not persist:
         return {
@@ -78,27 +108,29 @@ async def identify_fish(
             "lat": latitude,
             "lng": longitude,
             "weather": None,
+            "authenticated": user is not None,
         }
 
-    # Persist image to disk
+    # ===== IMAGE STORAGE =====
+    # Try Supabase first, fall back to local storage
     try:
-        uid = uuid.uuid4().hex
-        ext = EXT_FOR[file.content_type]
-        filename = uid + ext
-        rel_path = f"/assets/uploads/{filename}"
-        abs_path = os.path.join(SAVE_DIR, filename)
-        with open(abs_path, "wb") as f:
-            f.write(contents)
-        logger.info("Saved upload: %s", abs_path)
+        image_url = upload_image(contents, file.content_type)
+        if image_url:
+            rel_path = image_url  # Supabase URL
+            logger.info("Uploaded to Supabase Storage: %s", image_url)
+        else:
+            # Supabase not configured, use local storage
+            rel_path = save_image_local(contents, file.content_type)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write image: {e}")
+        logger.warning("Supabase upload failed, using local: %s", e)
+        rel_path = save_image_local(contents, file.content_type)
 
     # Optional weather snapshot if we have geo
     weather = None
     if latitude is not None and longitude is not None:
         weather = await fetch_weather(latitude, longitude)
 
-    # Create Catch row (requires lat/lng/weather_json columns in models + DB)
+    # Create Catch row
     try:
         catch = models.Catch(
             image_path=rel_path,
@@ -110,7 +142,7 @@ async def identify_fish(
             weather_json=json.dumps(weather) if weather else None,
         )
         db.add(catch)
-        db.flush()   # get catch.id before commit
+        db.flush()
 
         # Upsert Species + UserSpecies (so Collection updates immediately)
         if label:
@@ -122,7 +154,7 @@ async def identify_fish(
             if sp is None:
                 sp = models.Species(common_name=label)
                 db.add(sp)
-                db.flush()  # get sp.id
+                db.flush()
 
             link = (
                 db.query(models.UserSpecies)
@@ -136,8 +168,6 @@ async def identify_fish(
         db.refresh(catch)
     except SQLAlchemyError as e:
         db.rollback()
-        # Common cause during upgrade: missing columns (lat/lng/weather_json)
-        # This will return JSON like {"detail":"DB error ... no such column: catches.lat"}
         raise HTTPException(status_code=500, detail=f"DB error during identify: {e.__class__.__name__}: {e}")
 
     return {
@@ -150,4 +180,115 @@ async def identify_fish(
         "lat": catch.lat,
         "lng": catch.lng,
         "weather": weather,
+        "authenticated": True,
+        "user_id": user_id,
+    }
+
+
+@router.post("/identify-protected")
+async def identify_fish_protected(
+    file: UploadFile = File(...),
+    persist: bool = Form(True),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
+    db: Session = Depends(get_db),
+    user: AuthenticatedUser = Depends(get_current_user),  # REQUIRED auth
+):
+    """
+    Identify a fish - REQUIRES authentication.
+    Use this endpoint when you want to enforce login.
+    """
+    # Basic validation
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported content type: {file.content_type}"
+        )
+    contents = await file.read()
+    if len(contents) > MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large (> {MAX_BYTES//(1024*1024)} MB)"
+        )
+
+    # Inference
+    result = predict.run_inference(contents)
+    label = (result.get("label") or "Unknown").strip()
+    conf = float(result.get("confidence") or 0.0)
+
+    user_id = user.id
+
+    if not persist:
+        return {
+            "file_name": file.filename,
+            "content_type": file.content_type,
+            "prediction": result,
+            "saved_path": None,
+            "catch_id": None,
+            "created_at": None,
+            "lat": latitude,
+            "lng": longitude,
+            "weather": None,
+            "authenticated": True,
+            "user_id": user_id,
+        }
+
+    # Storage
+    try:
+        image_url = upload_image(contents, file.content_type)
+        if image_url:
+            rel_path = image_url
+        else:
+            rel_path = save_image_local(contents, file.content_type)
+    except Exception as e:
+        logger.warning("Supabase upload failed, using local: %s", e)
+        rel_path = save_image_local(contents, file.content_type)
+
+    # Weather
+    weather = None
+    if latitude is not None and longitude is not None:
+        weather = await fetch_weather(latitude, longitude)
+
+    # Save to DB
+    try:
+        catch = models.Catch(
+            image_path=rel_path,
+            species_label=label,
+            species_confidence=conf,
+            user_id=user_id,
+            lat=latitude,
+            lng=longitude,
+            weather_json=json.dumps(weather) if weather else None,
+        )
+        db.add(catch)
+        db.flush()
+
+        if label:
+            sp = db.query(models.Species).filter(models.Species.common_name.ilike(label)).first()
+            if sp is None:
+                sp = models.Species(common_name=label)
+                db.add(sp)
+                db.flush()
+            link = db.query(models.UserSpecies).filter_by(user_id=user_id, species_id=sp.id).first()
+            if link is None:
+                db.add(models.UserSpecies(user_id=user_id, species_id=sp.id))
+
+        db.commit()
+        db.refresh(catch)
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+
+    return {
+        "file_name": file.filename,
+        "saved_path": rel_path,
+        "content_type": file.content_type,
+        "prediction": result,
+        "catch_id": catch.id,
+        "created_at": catch.created_at.isoformat(),
+        "lat": catch.lat,
+        "lng": catch.lng,
+        "weather": weather,
+        "authenticated": True,
+        "user_id": user_id,
     }
