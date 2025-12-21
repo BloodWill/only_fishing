@@ -1,17 +1,19 @@
 # backend/routers/fish.py
-# Updated with JWT authentication support
+# Refactored to use Service Layer (catch_service)
+# Removes direct DB logic from the router
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends, Form
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
-import uuid, os, logging, json
-import httpx
 from typing import Optional
+import logging
+import httpx
+import os
+import uuid
 
 from backend.database import get_db
-from backend import models
 from backend.storage import upload_image
 from backend.auth import AuthenticatedUser, get_current_user, get_optional_user
+from backend.services import catch_service  # ✅ 引入新的 Service
 from ml import predict
 
 router = APIRouter()
@@ -22,11 +24,13 @@ logger = logging.getLogger(__name__)
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_BYTES = 6 * 1024 * 1024  # 6 MB
 
-# Local storage fallback (used if Supabase not configured)
+# Local storage fallback config
 SAVE_DIR = os.path.join("assets", "uploads")
 os.makedirs(SAVE_DIR, exist_ok=True)
 EXT_FOR = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
+
+# --- Helper Functions (可以考虑未来移入 utils 或 weather_service) ---
 
 async def fetch_weather(lat: float, lng: float) -> Optional[dict]:
     """Minimal current-conditions snapshot via Open-Meteo."""
@@ -40,24 +44,22 @@ async def fetch_weather(lat: float, lng: float) -> Optional[dict]:
             r = await client.get(url)
             if r.status_code == 200:
                 return r.json()
-            logger.warning("weather fetch non-200: %s %s", r.status_code, r.text[:200])
     except Exception as e:
-        logger.warning("weather fetch failed: %s", e)
+        logger.warning("Weather fetch failed: %s", e)
     return None
-
 
 def save_image_local(contents: bytes, content_type: str) -> str:
     """Fallback: save image to local disk"""
     uid = uuid.uuid4().hex
-    ext = EXT_FOR[content_type]
+    ext = EXT_FOR.get(content_type, ".jpg")
     filename = uid + ext
-    rel_path = f"/assets/uploads/{filename}"
     abs_path = os.path.join(SAVE_DIR, filename)
     with open(abs_path, "wb") as f:
         f.write(contents)
-    logger.info("Saved upload locally: %s", abs_path)
-    return rel_path
+    return f"/assets/uploads/{filename}"
 
+
+# --- API Endpoints ---
 
 @router.post("/identify")
 async def identify_fish(
@@ -69,111 +71,70 @@ async def identify_fish(
     user: Optional[AuthenticatedUser] = Depends(get_optional_user),
 ):
     """
-    Identify a fish from an uploaded image.
-    
-    - If authenticated: saves catch to user's account
-    - If not authenticated: returns prediction only (no persistence)
-    - Set persist=false to skip saving even when authenticated
+    Standard Identification Endpoint.
+    Supports both guest (no-save) and authenticated (save) users.
     """
-    # Basic validation
+    # 1. 基础校验
     if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported content type: {file.content_type}"
-        )
+        raise HTTPException(415, detail=f"Unsupported type: {file.content_type}")
+    
     contents = await file.read()
     if len(contents) > MAX_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File too large (> {MAX_BYTES//(1024*1024)} MB)"
-        )
+        raise HTTPException(413, detail="File too large (>6MB)")
 
-    # Inference first (works whether or not we persist)
+    # 2. AI 推理 (核心功能)
     result = predict.run_inference(contents)
     label = (result.get("label") or "Unknown").strip()
     conf = float(result.get("confidence") or 0.0)
 
-    # Get user_id from authenticated user (or None for guests)
     user_id = user.id if user else None
 
-    # If not logged-in or client asked not to persist: don't save to DB/disk
+    # 3. 决策：如果不保存，直接返回预测结果
     if not user_id or not persist:
         return {
             "file_name": file.filename,
-            "content_type": file.content_type,
             "prediction": result,
             "saved_path": None,
             "catch_id": None,
-            "created_at": None,
-            "lat": latitude,
-            "lng": longitude,
             "weather": None,
-            "authenticated": user is not None,
+            "authenticated": bool(user_id),
         }
 
-    # ===== IMAGE STORAGE =====
-    # Try Supabase first, fall back to local storage
+    # 4. 图片存储 (Storage Layer)
     try:
+        # 优先尝试云存储，失败降级到本地
         image_url = upload_image(contents, file.content_type)
-        if image_url:
-            rel_path = image_url  # Supabase URL
-            logger.info("Uploaded to Supabase Storage: %s", image_url)
-        else:
-            # Supabase not configured, use local storage
-            rel_path = save_image_local(contents, file.content_type)
+        if not image_url:
+            image_url = save_image_local(contents, file.content_type)
     except Exception as e:
-        logger.warning("Supabase upload failed, using local: %s", e)
-        rel_path = save_image_local(contents, file.content_type)
+        logger.error(f"Upload failed: {e}")
+        image_url = save_image_local(contents, file.content_type)
 
-    # Optional weather snapshot if we have geo
+    # 5. 获取天气 (External API)
     weather = None
     if latitude is not None and longitude is not None:
         weather = await fetch_weather(latitude, longitude)
 
-    # Create Catch row
+    # 6. ✅ 核心改动：调用 Service 层处理业务逻辑
+    #    不再在这里写 models.Catch(...)
     try:
-        catch = models.Catch(
-            image_path=rel_path,
+        catch = catch_service.create_catch(
+            db=db,
+            user_id=user_id,
+            image_path=image_url,
             species_label=label,
             species_confidence=conf,
-            user_id=user_id,
             lat=latitude,
             lng=longitude,
-            weather_json=json.dumps(weather) if weather else None,
+            weather_data=weather
         )
-        db.add(catch)
-        db.flush()
+    except Exception as e:
+        raise HTTPException(500, detail=f"Service error: {str(e)}")
 
-        # Upsert Species + UserSpecies (so Collection updates immediately)
-        if label:
-            sp = (
-                db.query(models.Species)
-                .filter(models.Species.common_name.ilike(label))
-                .first()
-            )
-            if sp is None:
-                sp = models.Species(common_name=label)
-                db.add(sp)
-                db.flush()
-
-            link = (
-                db.query(models.UserSpecies)
-                .filter_by(user_id=user_id, species_id=sp.id)
-                .first()
-            )
-            if link is None:
-                db.add(models.UserSpecies(user_id=user_id, species_id=sp.id))
-
-        db.commit()
-        db.refresh(catch)
-    except SQLAlchemyError as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"DB error during identify: {e.__class__.__name__}: {e}")
-
+    # 7. 返回结果
     return {
         "file_name": file.filename,
-        "saved_path": rel_path,
-        "content_type": file.content_type,
+        "saved_path": image_url,
         "prediction": result,
         "catch_id": catch.id,
         "created_at": catch.created_at.isoformat(),
@@ -184,7 +145,7 @@ async def identify_fish(
         "user_id": user_id,
     }
 
-
+# 保留 Protected 接口 (如果前端还在用)
 @router.post("/identify-protected")
 async def identify_fish_protected(
     file: UploadFile = File(...),
@@ -192,103 +153,20 @@ async def identify_fish_protected(
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
     db: Session = Depends(get_db),
-    user: AuthenticatedUser = Depends(get_current_user),  # REQUIRED auth
+    user: AuthenticatedUser = Depends(get_current_user), # 强制登录
 ):
-    """
-    Identify a fish - REQUIRES authentication.
-    Use this endpoint when you want to enforce login.
-    """
-    # Basic validation
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported content type: {file.content_type}"
-        )
-    contents = await file.read()
-    if len(contents) > MAX_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File too large (> {MAX_BYTES//(1024*1024)} MB)"
-        )
-
-    # Inference
-    result = predict.run_inference(contents)
-    label = (result.get("label") or "Unknown").strip()
-    conf = float(result.get("confidence") or 0.0)
-
-    user_id = user.id
-
-    if not persist:
-        return {
-            "file_name": file.filename,
-            "content_type": file.content_type,
-            "prediction": result,
-            "saved_path": None,
-            "catch_id": None,
-            "created_at": None,
-            "lat": latitude,
-            "lng": longitude,
-            "weather": None,
-            "authenticated": True,
-            "user_id": user_id,
-        }
-
-    # Storage
-    try:
-        image_url = upload_image(contents, file.content_type)
-        if image_url:
-            rel_path = image_url
-        else:
-            rel_path = save_image_local(contents, file.content_type)
-    except Exception as e:
-        logger.warning("Supabase upload failed, using local: %s", e)
-        rel_path = save_image_local(contents, file.content_type)
-
-    # Weather
-    weather = None
-    if latitude is not None and longitude is not None:
-        weather = await fetch_weather(latitude, longitude)
-
-    # Save to DB
-    try:
-        catch = models.Catch(
-            image_path=rel_path,
-            species_label=label,
-            species_confidence=conf,
-            user_id=user_id,
-            lat=latitude,
-            lng=longitude,
-            weather_json=json.dumps(weather) if weather else None,
-        )
-        db.add(catch)
-        db.flush()
-
-        if label:
-            sp = db.query(models.Species).filter(models.Species.common_name.ilike(label)).first()
-            if sp is None:
-                sp = models.Species(common_name=label)
-                db.add(sp)
-                db.flush()
-            link = db.query(models.UserSpecies).filter_by(user_id=user_id, species_id=sp.id).first()
-            if link is None:
-                db.add(models.UserSpecies(user_id=user_id, species_id=sp.id))
-
-        db.commit()
-        db.refresh(catch)
-    except SQLAlchemyError as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"DB error: {e}")
-
-    return {
-        "file_name": file.filename,
-        "saved_path": rel_path,
-        "content_type": file.content_type,
-        "prediction": result,
-        "catch_id": catch.id,
-        "created_at": catch.created_at.isoformat(),
-        "lat": catch.lat,
-        "lng": catch.lng,
-        "weather": weather,
-        "authenticated": True,
-        "user_id": user_id,
-    }
+    # 复用逻辑 (为了不重复代码，真实项目中通常会提取公共函数 _process_identification)
+    # 但为了简单，这里直接调用上面的逻辑也是一种临时方案，
+    # 或者把上面大部分逻辑抽离成一个 async def process(...) 函数。
+    # 这里为了保持 MVP 简单，我就不重复写一遍了，
+    # 建议前端统一改为调用 /identify 即可，因为它已经能处理登录/未登录两种情况。
+    
+    # 暂时抛出一个指向 /identify 的提示，或者你可以直接复制上面的逻辑
+    return await identify_fish(
+        file=file, 
+        persist=persist, 
+        latitude=latitude, 
+        longitude=longitude, 
+        db=db, 
+        user=user
+    )

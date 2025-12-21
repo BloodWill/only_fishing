@@ -1,0 +1,22 @@
+[
+  { "slug": "largemouth-bass", "common": "Largemouth Bass", "scientific": "Micropterus salmoides" },
+  { "slug": "smallmouth-bass", "common": "Smallmouth Bass", "scientific": "Micropterus dolomieu" },
+  { "slug": "white-bass", "common": "White Bass", "scientific": "Morone chrysops" },
+  { "slug": "white-crappie", "common": "White Crappie", "scientific": "Pomoxis annularis" },
+  { "slug": "black-crappie", "common": "Black Crappie", "scientific": "Pomoxis nigromaculatus" },
+  { "slug": "bluegill", "common": "Bluegill", "scientific": "Lepomis macrochirus" },
+  { "slug": "green-sunfish", "common": "Green Sunfish", "scientific": "Lepomis cyanellus" },
+  { "slug": "pumpkinseed", "common": "Pumpkinseed", "scientific": "Lepomis gibbosus" },
+  { "slug": "channel-catfish", "common": "Channel Catfish", "scientific": "Ictalurus punctatus" },
+  { "slug": "flathead-catfish", "common": "Flathead Catfish", "scientific": "Pylodictis olivaris" },
+  { "slug": "brown-trout", "common": "Brown Trout", "scientific": "Salmo trutta" },
+  { "slug": "rainbow-trout", "common": "Rainbow Trout", "scientific": "Oncorhynchus mykiss" },
+  { "slug": "brook-trout", "common": "Brook Trout", "scientific": "Salvelinus fontinalis" },
+  { "slug": "northern-pike", "common": "Northern Pike", "scientific": "Esox lucius" },
+  { "slug": "chain-pickerel", "common": "Chain Pickerel", "scientific": "Esox niger" },
+  { "slug": "muskellunge", "common": "Muskellunge", "scientific": "Esox masquinongy" },
+  { "slug": "walleye", "common": "Walleye", "scientific": "Sander vitreus" },
+  { "slug": "yellow-perch", "common": "Yellow Perch", "scientific": "Perca flavescens" },
+  { "slug": "white-perch", "common": "White Perch", "scientific": "Morone americana" },
+  { "slug": "common-carp", "common": "Common Carp", "scientific": "Cyprinus carpio" }
+]

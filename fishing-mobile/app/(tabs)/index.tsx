@@ -17,6 +17,7 @@ import {
   RefreshControl,
   Keyboard,
 } from "react-native";
+import Toast from 'react-native-toast-message';
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
@@ -562,11 +563,21 @@ export default function Home() {
     if (lat && lng) { form.append("latitude", String(lat)); form.append("longitude", String(lng)); }
     */
     setUploading(true);
+// ⏳ 开始上传提示 (可选，如果你想让用户知道正在处理)
+    Toast.show({
+      type: 'info',
+      text1: '正在识别中...',
+      text2: 'AI 正在分析您的图片 🤖',
+      visibilityTime: 2000,
+      autoHide: true,
+    });
+
     try {
       //const r = await fetch(`${API_BASE}/fish/identify`, { method: "POST", body: form, headers: { Accept: "application/json" } });
       //if (!r.ok) throw new Error(`${r.status}`);
       //const j: IdentifyResponse = await r.json();
 
+      
       const j = await identifyFish(uri, {
         persist: !!userId,
         latitude: lat,
@@ -582,8 +593,24 @@ export default function Home() {
       const lc: LocalCatch = { local_id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, local_uri: uri, species_label: pred || "Unknown", species_confidence: Number(j.prediction?.confidence ?? 0), created_at: new Date().toISOString(), remote_id: j.catch_id ?? undefined, synced: !!userId && !!j.catch_id } as LocalCatch;
       await addLocalCatch(lc);
       setLastLocalId(lc.local_id);
+// ✅ 成功提示
+      Toast.show({
+        type: 'success',
+        text1: '识别完成！✨',
+        text2: `AI 认为这是：${pred || "未知鱼种"}`,
+        position: 'top',
+        visibilityTime: 4000,
+      });
+
       setConfirmOpen(true);
-    } catch (e: any) { Alert.alert("Error", e?.message || "Upload failed"); }
+    } catch (e: any) { // ❌ 失败提示
+      Toast.show({
+        type: 'error',
+        text1: '上传失败',
+        text2: e?.message || "请检查网络连接",
+        position: 'top',
+        visibilityTime: 4000,
+      }); }
     finally { setUploading(false); }
   };
 
@@ -735,23 +762,81 @@ export default function Home() {
           </TouchableOpacity>
         </Modal>
 
-        {/* Regulations Modal */}
         <Modal visible={regulationsModal.visible} transparent animationType="slide" onRequestClose={() => setRegulationsModal({ species: "", visible: false })}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <View style={styles.regulationsHeader}><Text style={styles.regulationsIcon}>📋</Text><Text style={styles.regulationsTitle}>Fishing Regulations</Text></View>
-              <View style={styles.regulationsSpecies}><Text style={styles.regulationsSpeciesName}>{regulationsModal.species}</Text></View>
+              <View style={styles.regulationsHeader}>
+                <Text style={styles.regulationsIcon}>📋</Text>
+                <Text style={styles.regulationsTitle}>Fishing Regulations</Text>
+              </View>
+              <View style={styles.regulationsSpecies}>
+                <Text style={styles.regulationsSpeciesName}>{regulationsModal.species}</Text>
+              </View>
               
               {FISHING_REGULATIONS[regulationsModal.species] ? (
-                <View style={styles.regulationsGrid}>
-                  <View style={styles.regulationItem}><Text style={styles.regulationLabel}>Min Size</Text><Text style={styles.regulationValue}>{FISHING_REGULATIONS[regulationsModal.species].minSize}</Text></View>
-                  <View style={styles.regulationItem}><Text style={styles.regulationLabel}>Limit</Text><Text style={styles.regulationValue}>{FISHING_REGULATIONS[regulationsModal.species].dailyLimit}</Text></View>
-                  <View style={styles.regulationItem}><Text style={styles.regulationLabel}>Season</Text><Text style={styles.regulationValue}>{FISHING_REGULATIONS[regulationsModal.species].season}</Text></View>
-                </View>
+                <>
+                  <View style={styles.regulationsGrid}>
+                    <View style={styles.regulationItem}>
+                      <Text style={styles.regulationLabel}>Min Size</Text>
+                      <Text style={styles.regulationValue}>{FISHING_REGULATIONS[regulationsModal.species].minSize}</Text>
+                    </View>
+                    <View style={styles.regulationItem}>
+                      <Text style={styles.regulationLabel}>Daily Limit</Text>
+                      <Text style={styles.regulationValue}>{FISHING_REGULATIONS[regulationsModal.species].dailyLimit}</Text>
+                    </View>
+                    <View style={styles.regulationItem}>
+                      <Text style={styles.regulationLabel}>Season</Text>
+                      <Text style={styles.regulationValue}>{FISHING_REGULATIONS[regulationsModal.species].season}</Text>
+                    </View>
+                    {/* ✅ NEW: Slot Limit (if exists) */}
+                    {FISHING_REGULATIONS[regulationsModal.species].slotLimit && (
+                      <View style={styles.regulationItem}>
+                        <Text style={styles.regulationLabel}>Slot Limit</Text>
+                        <Text style={styles.regulationValue}>{FISHING_REGULATIONS[regulationsModal.species].slotLimit}</Text>
+                      </View>
+                    )}
+                    {/* ✅ NEW: Possession Limit (if exists) */}
+                    {FISHING_REGULATIONS[regulationsModal.species].possessionLimit && (
+                      <View style={styles.regulationItem}>
+                        <Text style={styles.regulationLabel}>Possession</Text>
+                        <Text style={styles.regulationValue}>{FISHING_REGULATIONS[regulationsModal.species].possessionLimit}</Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  {/* ✅ NEW: Notes Section */}
+                  {FISHING_REGULATIONS[regulationsModal.species].notes && (
+                    <View style={styles.regulationNotes}>
+                      <Text style={styles.regulationNotesLabel}>📝 Notes</Text>
+                      <Text style={styles.regulationNotesText}>{FISHING_REGULATIONS[regulationsModal.species].notes}</Text>
+                    </View>
+                  )}
+                  
+                  {/* ✅ NEW: Gear Restrictions (if exists) */}
+                  {FISHING_REGULATIONS[regulationsModal.species].gearRestrictions && (
+                    <View style={styles.regulationNotes}>
+                      <Text style={styles.regulationNotesLabel}>🎣 Gear Restrictions</Text>
+                      <Text style={styles.regulationNotesText}>{FISHING_REGULATIONS[regulationsModal.species].gearRestrictions}</Text>
+                    </View>
+                  )}
+                  
+                  {/* ✅ NEW: Special Permit Warning (if required) */}
+                  {FISHING_REGULATIONS[regulationsModal.species].specialPermit && (
+                    <View style={styles.permitWarning}>
+                      <Text style={styles.permitWarningText}>⚠️ Special permit required!</Text>
+                    </View>
+                  )}
+                </>
               ) : (
-                <View style={styles.noRegulations}><Text style={styles.noRegulationsText}>No specific regulations found.</Text></View>
+                <View style={styles.noRegulations}>
+                  <Text style={styles.noRegulationsText}>No specific regulations found.</Text>
+                  <Text style={styles.noRegulationsHint}>Check your local fishing regulations.</Text>
+                </View>
               )}
-              <TouchableOpacity style={styles.closeBtn} onPress={() => setRegulationsModal({ species: "", visible: false })}><Text style={styles.closeBtnText}>Got it!</Text></TouchableOpacity>
+              
+              <TouchableOpacity style={styles.closeBtn} onPress={() => setRegulationsModal({ species: "", visible: false })}>
+                <Text style={styles.closeBtnText}>Got it!</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </Modal>
@@ -928,4 +1013,44 @@ const styles = StyleSheet.create({
   cancelText: { color: "#374151", fontSize: 15, fontWeight: "700" },
   saveBtn: { backgroundColor: "#06b6d4", padding: 10, borderRadius: 10, flex: 1, marginLeft: 6, alignItems: "center" },
   saveText: { color: "white", fontSize: 15, fontWeight: "700" },
+  regulationNotes: {
+    backgroundColor: "#f0f9ff",
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#bae6fd",
+  },
+  regulationNotesLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0369a1",
+    marginBottom: 4,
+  },
+  regulationNotesText: {
+    fontSize: 14,
+    color: "#0c4a6e",
+    lineHeight: 20,
+  },
+  permitWarning: {
+    backgroundColor: "#fef3c7",
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#fde68a",
+    alignItems: "center",
+  },
+  permitWarningText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#92400e",
+  },
+  noRegulationsHint: {
+    fontSize: 12,
+    color: "#9ca3af",
+    marginTop: 4,
+  },
+
+
 });

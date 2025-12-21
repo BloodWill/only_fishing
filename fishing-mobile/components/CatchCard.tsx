@@ -1,122 +1,127 @@
-// components/CatchCard.tsx
-import * as React from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
-import { CatchItem } from '../types/catch';
-import { uploadLocalCatch } from '../lib/upload';
-import { API_BASE } from '../lib/config';
-import { useAuth } from '../lib/auth';
-import { useRouter } from 'expo-router';
+import React from "react";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { Image } from "expo-image"; // ✅ 替换 react-native 的 Image
+import { API_BASE, bust } from "@/lib/config";
+import { getRarityColor, getRarityBgColor } from "@/constants/fishData";
 
-export function CatchCard({
-  item,
-  onUploaded,
-}: {
-  item: CatchItem;
-  onUploaded: (next: CatchItem) => void;
-}) {
-  const { isLoggedIn } = useAuth();
-  const router = useRouter();
-  const [busy, setBusy] = React.useState(false);
+// 这是一个模糊的 hash 占位符 (Blurhash)，在图片加载前显示
+// 你可以根据图片的主色调生成，这里用一个通用的灰色
+const BLURHASH = "LEHV6nWB2yk8pyo0adR*.7kCMdnj";
 
-  const handleUpload = async () => {
-    try {
-      setBusy(true);
-      const next = await uploadLocalCatch(item);
-      onUploaded(next);
-    } catch (e) {
-      onUploaded({ ...item, syncStatus: 'failed' });
-    } finally {
-      setBusy(false);
-    }
-  };
+type CatchCardProps = {
+  item: any;
+  onPress: () => void;
+  showRarity?: boolean;
+};
 
-  const src =
-    item.storage === 'local' && item.image_uri
-      ? { uri: item.image_uri }
-      : item.image_path
-      ? { uri: `${API_BASE}${item.image_path}` }
-      : undefined;
+export default function CatchCard({ item, onPress, showRarity = false }: CatchCardProps) {
+  // 处理图片路径：如果是本地文件直接用，如果是远程则拼接 API_BASE 并加缓存戳
+  const uri = item.image_path?.startsWith("file://")
+    ? item.image_path
+    : bust(`${API_BASE}${item.image_path}`);
 
   return (
     <TouchableOpacity
-      activeOpacity={0.85}
-      onPress={() => item.storage === 'online' ? router.push(`/catch/${item.id}`) : null}
       style={styles.card}
+      onPress={onPress}
+      activeOpacity={0.9}
     >
-      <View style={styles.topRow}>
-        <Text style={styles.title}>{item.species_label ?? 'Unknown species'}</Text>
-        <View style={styles.right}>
-          <Text
-            style={[
-              styles.badge,
-              item.storage === 'local' ? styles.localBadge : styles.onlineBadge,
-            ]}
-          >
-            {item.storage === 'local' ? 'Local' : 'Online'}
-          </Text>
+      <Image
+        style={styles.image}
+        source={{ uri }}
+        placeholder={BLURHASH} // ✅ 加载时显示模糊占位
+        contentFit="cover"     // ✅ 替代 resizeMode
+        transition={500}       // ✅ 0.5秒淡入动画
+        cachePolicy="disk"     // ✅ 强制磁盘缓存
+      />
 
-          {item.storage === 'local' && isLoggedIn ? (
-            <TouchableOpacity
-              disabled={busy}
-              onPress={handleUpload}
-              style={[styles.uploadBtn, busy && styles.uploadBtnBusy]}
-            >
-              <Text style={styles.uploadBtnText}>{busy ? 'Uploading…' : 'Upload'}</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+      <View style={styles.overlay}>
+        <Text style={styles.species} numberOfLines={1}>
+          {item.species_label || "Unknown"}
+        </Text>
+        
+        {item.species_confidence && (
+          <Text style={styles.confidence}>
+            {(item.species_confidence * 100).toFixed(0)}%
+          </Text>
+        )}
       </View>
 
-      {src ? (
-        <Image source={src} style={styles.image} resizeMode="cover" />
-      ) : (
-        <View style={[styles.image, styles.imagePlaceholder]}>
-          <Text style={{ color: '#999' }}>No image</Text>
+      {/* 显示本地/云端状态徽章 */}
+      {item._local && (
+        <View style={styles.localBadge}>
+          <Text style={styles.localBadgeText}>Local</Text>
         </View>
       )}
-
-      {/* Hints */}
-      {item.storage === 'local' && !isLoggedIn ? (
-        <Text style={styles.hint}>Log in to upload this local catch.</Text>
-      ) : null}
-      {item.storage === 'local' && item.syncStatus === 'failed' ? (
-        <Text style={styles.error}>Upload failed. Check network and try again.</Text>
-      ) : null}
+      
+      {/* 稀有度徽章 (可选) */}
+      {showRarity && item.rarity && (
+         <View style={[styles.rarityBadge, { backgroundColor: getRarityBgColor(item.rarity) }]}>
+           <Text style={[styles.rarityText, { color: getRarityColor(item.rarity) }]}>
+             {item.rarity}
+           </Text>
+         </View>
+      )}
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    padding: 12,
+    flex: 1,
+    aspectRatio: 0.8, // 保持卡片比例
     borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#e5e7eb",
+    position: "relative",
     borderWidth: 1,
-    borderColor: '#eee',
-    marginBottom: 12,
-    backgroundColor: 'white',
+    borderColor: "rgba(255,255,255,0.5)",
   },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  title: { fontWeight: '600', fontSize: 16 },
-  right: { flexDirection: 'row', alignItems: 'center', columnGap: 8 },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
+  image: {
+    width: "100%",
+    height: "100%",
+  },
+  overlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    padding: 8,
+  },
+  species: {
+    color: "white",
     fontSize: 12,
-    overflow: 'hidden',
+    fontWeight: "700",
   },
-  localBadge: { backgroundColor: '#FFF5E5', color: '#C76B00' },
-  onlineBadge: { backgroundColor: '#E6FFEE', color: '#16794D' },
-  uploadBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#0A84FF',
+  confidence: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 10,
   },
-  uploadBtnBusy: { backgroundColor: '#7fb6ff' },
-  uploadBtnText: { color: 'white', fontWeight: '600' },
-  image: { width: '100%', height: 180, borderRadius: 10, marginTop: 8 },
-  imagePlaceholder: { backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center' },
-  hint: { marginTop: 8, fontSize: 12, color: '#666' },
-  error: { marginTop: 8, fontSize: 12, color: '#B00020' },
+  localBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    backgroundColor: "#f59e0b",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  localBadgeText: {
+    color: "white",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  rarityBadge: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  rarityText: {
+    fontSize: 9,
+    fontWeight: "700",
+  },
 });

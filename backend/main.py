@@ -4,20 +4,15 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.database import engine
 from backend import models
-from backend.routers import fish, catches, species
-from backend.routers import admin_migrate  # + existing imports
-# at top with other routers
-from backend.routers import stats
-from .routers import predict as predict_router
-
-
+from backend.routers import fish, catches, species, admin_migrate, stats
+from backend.routers import predict as predict_router
 
 app = FastAPI(title="Fishing App API")
 
-# Create tables (simple; move to Alembic later)
+# Create tables
 models.Base.metadata.create_all(bind=engine)
 
-# CORS (loose for dev; tighten allow_origins later)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -40,9 +35,9 @@ app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 # Routers
 app.include_router(fish.router, prefix="/fish", tags=["fish"])
 app.include_router(catches.router, prefix="/catches", tags=["catches"])
+# 修复：移除重复的 species router 注册，只保留下面这一行带 prefix 的
 app.include_router(species.router,  prefix="/species", tags=["species"])
-app.include_router(species.router)  # /species/*
+
 app.include_router(admin_migrate.router)
-# where routers are included
-app.include_router(stats.router)  # exposes /stats/users-unique-species
+app.include_router(stats.router)
 app.include_router(predict_router.router)

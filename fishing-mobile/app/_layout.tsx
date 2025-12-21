@@ -1,5 +1,5 @@
 // app/_layout.tsx
-// Root layout with ErrorBoundary, Sentry crash reporting, and AuthProvider
+// Root layout with ErrorBoundary, Sentry crash reporting, AuthProvider AND Toast
 
 import 'react-native-reanimated'; // MUST be first import
 
@@ -8,6 +8,9 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+
+// ✅ 1. 引入 Toast
+import Toast from 'react-native-toast-message';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -35,13 +38,10 @@ export default function RootLayout() {
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
 
-  // Handle font loading error
   if (error) {
     console.error('Font loading error:', error);
-    // Continue without custom font rather than crashing
   }
 
-  // Show loading screen while fonts load
   if (!loaded && !error) {
     return <LoadingScreen />;
   }
@@ -56,6 +56,8 @@ export default function RootLayout() {
             <Stack.Screen name="+not-found" />
           </Stack>
           <StatusBar style="auto" />
+          {/* ✅ 2. 将 Toast 挂载在最顶层 (ThemeProvider 内部，覆盖在 Stack 之上) */}
+          <Toast />
         </ThemeProvider>
       </AuthProvider>
     </ErrorBoundary>

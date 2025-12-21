@@ -1,5 +1,4 @@
 # backend/routers/catches.py
-# Updated with JWT authentication support
 
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from sqlalchemy.orm import Session
@@ -21,16 +20,22 @@ async def list_catches(
     limit: int = Query(50, ge=1, le=500),
     offset: int = 0,
     user: Optional[AuthenticatedUser] = Depends(get_optional_user),
+    mine_only: bool = False  # 新增参数，允许前端显式请求“我的鱼获”
 ):
     """
-    List catches. If authenticated, returns only user's catches.
-    If not authenticated, returns recent public catches.
+    List catches. 
+    - By default, returns recent catches (Community Feed).
+    - If mine_only=True, returns only authenticated user's catches.
     """
     q = db.query(models.Catch).order_by(models.Catch.id.desc())
     
-    # If authenticated, filter to user's catches only
-    if user:
+    if mine_only:
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required to view your catches")
         q = q.filter(models.Catch.user_id == user.id)
+    
+    # 这里我们移除了原来的逻辑： "if user: filter(user_id)". 
+    # 原逻辑会导致登录用户无法查看广场数据。现在由 mine_only 控制。
     
     return q.offset(offset).limit(limit).all()
 
@@ -43,8 +48,7 @@ async def list_my_catches(
     user: AuthenticatedUser = Depends(get_current_user),
 ):
     """
-    List authenticated user's catches only.
-    Requires authentication.
+    Shortcut endpoint for authenticated user's catches.
     """
     q = db.query(models.Catch).filter(
         models.Catch.user_id == user.id
@@ -61,15 +65,23 @@ async def get_catch(
 ):
     """
     Get a specific catch by ID.
-    If the catch belongs to another user, returns 403.
+    Access Control:
+    - If the catch has a user_id (Private/User owned), only the owner can view it.
+    - (ADJUSTMENT: If you want all catches to be public read, remove the 403 block below)
     """
     obj = db.query(models.Catch).filter(models.Catch.id == catch_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Catch not found")
     
-    # If catch has a user_id and requester is different user, deny access
-    if obj.user_id and user and obj.user_id != user.id:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    # --- 安全修复 ---
+    # 如果记录归属于某个用户
+    if obj.user_id:
+        # 且 (当前未登录 OR 当前登录用户不是该记录拥有者)
+        if not user or obj.user_id != user.id:
+            # 拒绝访问
+            # 注意：如果你希望做成社交应用（人人可看），请注释掉下面两行
+            raise HTTPException(status_code=403, detail="Forbidden: This catch is private")
+    # ----------------
     
     return obj
 
@@ -85,12 +97,15 @@ def _apply_update_and_upsert(obj: models.Catch, payload: schemas.CatchUpdate, db
     if payload.species_confidence is not None:
         obj.species_confidence = float(payload.species_confidence)
 
+    # 如果修改了鱼种标签，自动更新图鉴
     if changed_label and obj.user_id and obj.species_label:
         sp = db.query(models.Species).filter(models.Species.common_name.ilike(obj.species_label)).first()
         if sp is None:
+            # 简单处理，更完善的处理在 catch_service 中
             sp = models.Species(common_name=obj.species_label)
             db.add(sp)
             db.flush()
+            
         link = db.query(models.UserSpecies).filter_by(user_id=obj.user_id, species_id=sp.id).first()
         if link is None:
             db.add(models.UserSpecies(user_id=obj.user_id, species_id=sp.id))
@@ -104,14 +119,12 @@ async def update_catch(
     user: AuthenticatedUser = Depends(get_current_user),
 ):
     """
-    Update a catch. Requires authentication.
-    User can only update their own catches.
+    Update a catch. Only owner can update.
     """
     obj = db.query(models.Catch).filter(models.Catch.id == catch_id).first()
     if not obj:
         raise HTTPException(status_code=404, detail="Catch not found")
     
-    # Only owner can update
     if obj.user_id != user.id:
         raise HTTPException(status_code=403, detail="Forbidden - not your catch")
 
@@ -128,9 +141,6 @@ async def update_catch_put(
     db: Session = Depends(get_db),
     user: AuthenticatedUser = Depends(get_current_user),
 ):
-    """
-    Update a catch (PUT). Requires authentication.
-    """
     return await update_catch(catch_id, payload, db, user)
 
 
@@ -141,18 +151,16 @@ async def delete_catch(
     user: AuthenticatedUser = Depends(get_current_user),
 ):
     """
-    Delete a catch. Requires authentication.
-    User can only delete their own catches.
+    Delete a catch. Only owner can delete.
     """
     catch = db.query(models.Catch).filter(models.Catch.id == catch_id).first()
     if catch is None:
         raise HTTPException(status_code=404, detail="Catch not found")
     
-    # Only owner can delete
     if catch.user_id != user.id:
         raise HTTPException(status_code=403, detail="Forbidden - not your catch")
 
-    # Delete image - handle both Supabase URLs and local paths
+    # Delete image logic
     if catch.image_path:
         if is_supabase_url(catch.image_path):
             delete_image(catch.image_path)

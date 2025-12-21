@@ -1,3 +1,7 @@
+// lib/storage.ts
+// Local catch storage with AsyncStorage
+// UPDATED: Added lat/lng fields to LocalCatch type
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type LocalCatch = {
@@ -8,6 +12,9 @@ export type LocalCatch = {
   created_at: string;            // ISO
   remote_id?: number | null;
   synced?: boolean;              // true once uploaded
+  // ✅ Added geo fields
+  lat?: number | null;
+  lng?: number | null;
 };
 
 const KEY = "@fish/catches:v1";
@@ -20,6 +27,7 @@ async function readAll(): Promise<LocalCatch[]> {
     return [];
   }
 }
+
 async function writeAll(rows: LocalCatch[]) {
   await AsyncStorage.setItem(KEY, JSON.stringify(rows));
 }

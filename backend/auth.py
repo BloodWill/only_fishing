@@ -1,17 +1,15 @@
 # backend/auth.py
-# JWT verification for Supabase Auth tokens
+# JWT verification locally (Performance optimized)
 
 import os
-import httpx
+import jwt  # pip install pyjwt
 from typing import Optional
 from fastapi import HTTPException, Header, Depends
 from pydantic import BaseModel
 
 # Supabase configuration
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")  # Optional: for local JWT validation
-
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+ALGORITHM = "HS256"
 
 class AuthenticatedUser(BaseModel):
     """Represents an authenticated user from Supabase"""
@@ -19,43 +17,38 @@ class AuthenticatedUser(BaseModel):
     email: Optional[str] = None
     role: str = "authenticated"
 
-
-async def verify_token_with_supabase(token: str) -> Optional[dict]:
+async def verify_token_locally(token: str) -> Optional[dict]:
     """
-    Verify JWT token by calling Supabase's auth endpoint.
-    This is the recommended approach as it handles token refresh, revocation, etc.
+    Verify JWT token locally using the secret.
+    This is much faster than calling Supabase API for every request.
     """
-    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    if not SUPABASE_JWT_SECRET:
+        # 如果没有配置 Secret，为了安全起见，返回 None (或者你可以选择在开发环境放行，但不推荐)
+        print("Error: SUPABASE_JWT_SECRET is not set in environment variables.")
         return None
     
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(
-                f"{SUPABASE_URL}/auth/v1/user",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "apikey": SUPABASE_ANON_KEY,
-                }
-            )
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return None
-    except Exception:
+        # Supabase tokens usually have 'aud': 'authenticated'.
+        # If you encounter "Invalid audience" errors, you can set verify_aud=False
+        payload = jwt.decode(
+            token, 
+            SUPABASE_JWT_SECRET, 
+            algorithms=[ALGORITHM],
+            options={"verify_aud": False} 
+        )
+        return payload
+    except jwt.ExpiredSignatureError:
         return None
-
+    except jwt.PyJWTError as e:
+        print(f"JWT Verification Error: {e}")
+        return None
 
 async def get_current_user(
     authorization: Optional[str] = Header(None, alias="Authorization")
 ) -> AuthenticatedUser:
     """
     FastAPI dependency to get the current authenticated user.
-    
-    Usage in routes:
-        @router.get("/protected")
-        async def protected_route(user: AuthenticatedUser = Depends(get_current_user)):
-            return {"user_id": user.id}
+    Throws 401 if not authenticated.
     """
     if not authorization:
         raise HTTPException(
@@ -64,7 +57,6 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Extract token from "Bearer <token>"
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(
@@ -75,39 +67,29 @@ async def get_current_user(
     
     token = parts[1]
     
-    # Verify with Supabase
-    user_data = await verify_token_with_supabase(token)
+    # 使用本地验证替代远程请求
+    payload = await verify_token_locally(token)
     
-    if not user_data:
+    if not payload:
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # Supabase JWT payload 中，用户 ID 通常在 'sub' 字段
     return AuthenticatedUser(
-        id=user_data.get("id", ""),
-        email=user_data.get("email"),
-        role=user_data.get("role", "authenticated"),
+        id=payload.get("sub"),
+        email=payload.get("email"),
+        role=payload.get("role", "authenticated"),
     )
-
 
 async def get_optional_user(
     authorization: Optional[str] = Header(None, alias="Authorization")
 ) -> Optional[AuthenticatedUser]:
     """
     FastAPI dependency to optionally get the current user.
-    Returns None if not authenticated (instead of raising 401).
-    
-    Useful for endpoints that work for both guests and authenticated users.
-    
-    Usage in routes:
-        @router.get("/public-or-private")
-        async def mixed_route(user: Optional[AuthenticatedUser] = Depends(get_optional_user)):
-            if user:
-                return {"user_id": user.id}
-            else:
-                return {"message": "Guest access"}
+    Returns None if not authenticated.
     """
     if not authorization:
         return None
@@ -117,13 +99,13 @@ async def get_optional_user(
         return None
     
     token = parts[1]
-    user_data = await verify_token_with_supabase(token)
+    payload = await verify_token_locally(token)
     
-    if not user_data:
+    if not payload:
         return None
     
     return AuthenticatedUser(
-        id=user_data.get("id", ""),
-        email=user_data.get("email"),
-        role=user_data.get("role", "authenticated"),
+        id=payload.get("sub"),
+        email=payload.get("email"),
+        role=payload.get("role", "authenticated"),
     )

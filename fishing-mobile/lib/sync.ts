@@ -1,5 +1,6 @@
 // lib/sync.ts
 // Updated with JWT authentication
+// FIXED: Removed lat/lng fields that don't exist on LocalCatch
 
 import { API_BASE } from "@/lib/config";
 import { getLocalCatches, updateLocalCatch, LocalCatch } from "@/lib/storage";
@@ -37,17 +38,18 @@ export async function syncPending(userId: string): Promise<void> {
         type: "image/jpeg",
       } as unknown as Blob);
 
-      if (local.species_label) form.append("species_label", local.species_label);
-      if (typeof local.species_confidence === "number") {
-        form.append("species_confidence", String(local.species_confidence));
-      }
-      if (local.lat) form.append("latitude", String(local.lat));
-      if (local.lng) form.append("longitude", String(local.lng));
+      // ✅ FIX: Only append fields that /fish/identify accepts
+      // The backend re-runs inference, so species_label/confidence aren't needed
       form.append("persist", "true");
+      
+      // Include geo coords if available
+      if (local.lat != null) form.append("latitude", String(local.lat));
+      if (local.lng != null) form.append("longitude", String(local.lng));
 
       // ✅ Use JWT auth header instead of X-User-Id
       const authHeaders = await getAuthHeaders();
-      
+
+      // ✅ FIX: Don't set Content-Type for FormData
       const resp = await fetch(`${API_BASE}/fish/identify`, {
         method: "POST",
         headers: {
@@ -63,6 +65,10 @@ export async function syncPending(userId: string): Promise<void> {
           synced: true,
           remote_id: data.catch_id,
         });
+        console.log(`✅ Synced local catch ${local.local_id} -> remote ${data.catch_id}`);
+      } else {
+        const errText = await resp.text().catch(() => "");
+        console.warn(`❌ Sync failed for ${local.local_id}: ${resp.status} ${errText}`);
       }
     } catch (e) {
       console.warn("Sync failed for", local.local_id, e);
