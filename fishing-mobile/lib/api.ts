@@ -2,9 +2,43 @@
 // Updated with JWT authentication support
 // FIXED: Removed manual Content-Type for FormData
 // ADDED: Debug logging for auth issues
+// ============== v3 FIX: Added timeouts to prevent hanging ==============
 
 import { API_BASE, bust } from "@/lib/config";
 import { supabase } from "@/lib/supabase";
+
+// ============================================
+// TIMEOUT CONFIGURATION (NEW)
+// ============================================
+const DEFAULT_TIMEOUT = 15000; // 15 seconds for normal requests
+const UPLOAD_TIMEOUT = 60000;  // 60 seconds for file uploads
+
+/**
+ * Fetch with timeout wrapper - prevents requests from hanging forever
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeout: number = DEFAULT_TIMEOUT
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeout / 1000}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 // ============================================
 // TYPES
@@ -37,7 +71,7 @@ async function getAuthToken(): Promise<string | null> {
   try {
     const { data: { session }, error } = await supabase.auth.getSession();
     
-    // 🔍 DEBUG: Log session state
+    // 🔐 DEBUG: Log session state
     if (__DEV__) {
       console.log("🔐 Auth Debug:", {
         hasSession: !!session,
@@ -74,7 +108,7 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
 }
 
 // ============================================
-// EXISTING API FUNCTIONS (Updated with Auth)
+// EXISTING API FUNCTIONS (Updated with Auth + Timeout)
 // ============================================
 
 export async function predictFish(fileUri: string, mime = "image/jpeg"): Promise<PredictResp> {
@@ -86,11 +120,16 @@ export async function predictFish(fileUri: string, mime = "image/jpeg"): Promise
   const authHeaders = await getAuthHeaders();
 
   // ✅ FIX: Don't set Content-Type manually for FormData
-  const r = await fetch(`${base}/predict`, {
-    method: "POST",
-    body: form,
-    headers: authHeaders,
-  });
+  // ✅ FIX: Added timeout
+  const r = await fetchWithTimeout(
+    `${base}/predict`,
+    {
+      method: "POST",
+      body: form,
+      headers: authHeaders,
+    },
+    UPLOAD_TIMEOUT
+  );
   if (!r.ok) throw new Error(`predict ${r.status}`);
   return r.json();
 }
@@ -104,7 +143,8 @@ export async function sendFeedback(params: {
   const base = API_BASE.replace(/\/+$/, "");
   const authHeaders = await getAuthHeaders();
 
-  const r = await fetch(`${base}/feedback`, {
+  // ✅ FIX: Added timeout
+  const r = await fetchWithTimeout(`${base}/feedback`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -130,7 +170,8 @@ export async function apiGet<T>(endpoint: string): Promise<T> {
   const base = API_BASE.replace(/\/+$/, "");
   const authHeaders = await getAuthHeaders();
 
-  const r = await fetch(`${base}${endpoint}`, {
+  // ✅ FIX: Added timeout
+  const r = await fetchWithTimeout(`${base}${endpoint}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -150,7 +191,8 @@ export async function apiPost<T>(endpoint: string, data: any): Promise<T> {
   const base = API_BASE.replace(/\/+$/, "");
   const authHeaders = await getAuthHeaders();
 
-  const r = await fetch(`${base}${endpoint}`, {
+  // ✅ FIX: Added timeout
+  const r = await fetchWithTimeout(`${base}${endpoint}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -179,13 +221,18 @@ export async function apiPostForm<T>(endpoint: string, formData: FormData): Prom
     console.log(`📤 POST ${endpoint} with auth:`, !!authHeaders["Authorization"]);
   }
 
-  const r = await fetch(`${base}${endpoint}`, {
-    method: "POST",
-    headers: authHeaders,  // No Content-Type here!
-    body: formData,
-  });
+  // ✅ FIX: Added timeout (60s for uploads)
+  const r = await fetchWithTimeout(
+    `${base}${endpoint}`,
+    {
+      method: "POST",
+      headers: authHeaders,  // No Content-Type here!
+      body: formData,
+    },
+    UPLOAD_TIMEOUT
+  );
 
-  // 🔍 DEBUG: Log response
+  // 🔐 DEBUG: Log response
   if (__DEV__) {
     console.log(`📥 Response ${endpoint}:`, r.status);
   }
@@ -198,7 +245,7 @@ export async function apiPostForm<T>(endpoint: string, formData: FormData): Prom
 
   const data = await r.json();
   
-  // 🔍 DEBUG: Check if catch was saved
+  // 🔐 DEBUG: Check if catch was saved
   if (__DEV__ && endpoint.includes("identify")) {
     console.log("🐟 Identify response:", {
       catch_id: data.catch_id,
@@ -215,7 +262,8 @@ export async function apiPatch<T>(endpoint: string, data: any): Promise<T> {
   const base = API_BASE.replace(/\/+$/, "");
   const authHeaders = await getAuthHeaders();
 
-  const r = await fetch(`${base}${endpoint}`, {
+  // ✅ FIX: Added timeout
+  const r = await fetchWithTimeout(`${base}${endpoint}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -236,7 +284,8 @@ export async function apiDelete(endpoint: string): Promise<void> {
   const base = API_BASE.replace(/\/+$/, "");
   const authHeaders = await getAuthHeaders();
 
-  const r = await fetch(`${base}${endpoint}`, {
+  // ✅ FIX: Added timeout
+  const r = await fetchWithTimeout(`${base}${endpoint}`, {
     method: "DELETE",
     headers: authHeaders,
   });
@@ -345,11 +394,11 @@ export async function identifyFish(
   return apiPostForm("/fish/identify", formData);
 }
 
-// front_end/lib/api.ts
+// ============================================
+// SPECIES API FUNCTIONS
+// ============================================
 
-// ... (保留之前的代码)
-
-// ✅ 新增：鱼种数据类型 (对应后端的 SpeciesRead)
+// ✅ 鱼种数据类型 (对应后端的 SpeciesRead)
 export type SpeciesRead = {
   id: number;
   common_name: string;
@@ -360,7 +409,7 @@ export type SpeciesRead = {
   // ... 其他字段按需添加
 };
 
-// ✅ 新增：获取全量图鉴数据
+// ✅ 获取全量图鉴数据
 export async function getAllSpecies(): Promise<SpeciesRead[]> {
   // 获取 1000 条，确保能拿完所有鱼
   return apiGet<SpeciesRead[]>("/species?limit=1000");
