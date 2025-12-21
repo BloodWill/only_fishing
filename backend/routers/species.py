@@ -1,11 +1,32 @@
 # backend/routers/species.py
+#
+# ============== CHANGES FROM ORIGINAL ==============
+# 1. Line 6: Added 're' import
+# 2. Line 16-23: Added escape_like helper function
+# 3. Line 250: Use escape_like to prevent SQL injection via wildcards
+# ===================================================
+
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import re  # ✅ NEW: For escape_like
 
 from backend.database import get_db
 from backend import models, schemas
 from backend.auth import AuthenticatedUser, get_current_user
+
+
+# ============== FIX: LIKE escape helper ==============
+def escape_like(s: str) -> str:
+    """
+    Escape special LIKE characters (%, _, \) to prevent SQL injection.
+    Without this, users could search for '%' to match everything.
+    """
+    if not s:
+        return s
+    return re.sub(r'([%_\\])', r'\\\1', s)
+# =====================================================
+
 
 router = APIRouter(prefix="/species", tags=["species"])
 
@@ -430,7 +451,7 @@ FULL_FISH_DATA = [
 @router.get("/", response_model=List[schemas.SpeciesRead])
 def list_species(
     db: Session = Depends(get_db),
-    q: Optional[str] = Query(None, description="Search species by name"),
+    q: Optional[str] = Query(None, description="Search species by name", max_length=100),
     limit: int = 500,
 ):
     """
@@ -439,7 +460,9 @@ def list_species(
     """
     query = db.query(models.Species)
     if q:
-        query = query.filter(models.Species.common_name.ilike(f"%{q}%"))
+        # ✅ FIX: Escape LIKE wildcards to prevent SQL injection
+        safe_q = escape_like(q.strip())
+        query = query.filter(models.Species.common_name.ilike(f"%{safe_q}%"))
     return query.order_by(models.Species.common_name.asc()).limit(limit).all()
 
 

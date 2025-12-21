@@ -1,7 +1,13 @@
 # backend/routers/catches.py
+#
+# ============== CHANGES FROM ORIGINAL ==============
+# 1. Line 5: Added IntegrityError import
+# 2. Line 93-114: Updated _apply_update_and_upsert with savepoint handling
+# ===================================================
 
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError  # ✅ NEW: Added for race condition handling
 from typing import List, Optional
 from pathlib import Path
 
@@ -20,7 +26,7 @@ async def list_catches(
     limit: int = Query(50, ge=1, le=500),
     offset: int = 0,
     user: Optional[AuthenticatedUser] = Depends(get_optional_user),
-    mine_only: bool = False  # 新增参数，允许前端显式请求“我的鱼获”
+    mine_only: bool = False  # 新增参数，允许前端显式请求"我的鱼获"
 ):
     """
     List catches. 
@@ -86,8 +92,9 @@ async def get_catch(
     return obj
 
 
+# ============== FIX: Updated with savepoints ==============
 def _apply_update_and_upsert(obj: models.Catch, payload: schemas.CatchUpdate, db: Session):
-    """Helper to apply updates and upsert species"""
+    """Helper to apply updates and upsert species with race condition handling"""
     changed_label = False
     if payload.species_label is not None:
         new_label = (payload.species_label or "").strip()
@@ -100,15 +107,32 @@ def _apply_update_and_upsert(obj: models.Catch, payload: schemas.CatchUpdate, db
     # 如果修改了鱼种标签，自动更新图鉴
     if changed_label and obj.user_id and obj.species_label:
         sp = db.query(models.Species).filter(models.Species.common_name.ilike(obj.species_label)).first()
+        
         if sp is None:
-            # 简单处理，更完善的处理在 catch_service 中
-            sp = models.Species(common_name=obj.species_label)
-            db.add(sp)
-            db.flush()
-            
-        link = db.query(models.UserSpecies).filter_by(user_id=obj.user_id, species_id=sp.id).first()
-        if link is None:
-            db.add(models.UserSpecies(user_id=obj.user_id, species_id=sp.id))
+            # ✅ FIX: Use savepoint to handle race condition
+            try:
+                with db.begin_nested():  # SAVEPOINT
+                    sp = models.Species(common_name=obj.species_label)
+                    db.add(sp)
+                    db.flush()
+            except IntegrityError:
+                # Another request created it - fetch it
+                sp = db.query(models.Species).filter(
+                    models.Species.common_name.ilike(obj.species_label)
+                ).first()
+        
+        if sp:
+            link = db.query(models.UserSpecies).filter_by(user_id=obj.user_id, species_id=sp.id).first()
+            if link is None:
+                # ✅ FIX: Use savepoint
+                try:
+                    with db.begin_nested():  # SAVEPOINT
+                        db.add(models.UserSpecies(user_id=obj.user_id, species_id=sp.id))
+                        db.flush()
+                except IntegrityError:
+                    # Already exists - that's fine
+                    pass
+# ==========================================================
 
 
 @router.patch("/{catch_id}", response_model=schemas.CatchRead)
@@ -162,16 +186,16 @@ async def delete_catch(
 
     # Delete image logic
     if catch.image_path:
-        if is_supabase_url(catch.image_path):
-            delete_image(catch.image_path)
-        else:
-            rel = catch.image_path.lstrip("/")
-            candidate = Path(rel).resolve()
-            try:
+        try:
+            if is_supabase_url(catch.image_path):
+                delete_image(catch.image_path)
+            else:
+                rel = catch.image_path.lstrip("/")
+                candidate = Path(rel).resolve()
                 if candidate.is_file() and UPLOADS_DIR in candidate.parents:
                     candidate.unlink(missing_ok=True)
-            except Exception:
-                pass
+        except Exception:
+            pass  # Don't fail delete if image cleanup fails
 
     db.delete(catch)
     db.commit()

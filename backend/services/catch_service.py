@@ -1,4 +1,10 @@
 # backend/services/catch_service.py
+#
+# ============== CHANGES FROM ORIGINAL ==============
+# 1. Line 55-66: Use db.begin_nested() savepoints instead of db.rollback()
+#    This prevents rolling back the entire Catch when Species insert fails
+# 2. Line 75-83: Same savepoint fix for UserSpecies
+# ===================================================
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
@@ -43,42 +49,48 @@ def create_catch(
         db.flush() # 获取 catch.id
 
         # 2. 自动维护 Species 表
-        if species_label and species_label != "Unknown":
+        if species_label and species_label.strip() and species_label.lower() != "unknown":
             # 先尝试查询
             sp = db.query(models.Species).filter(
                 models.Species.common_name.ilike(species_label)
             ).first()
             
             if sp is None:
+                # ============== FIX: Use savepoint ==============
+                # BEFORE: db.rollback() would rollback the ENTIRE transaction
+                #         including the Catch record we just created!
+                # AFTER:  db.begin_nested() creates a SAVEPOINT, so only
+                #         the Species insert is rolled back on conflict
                 try:
-                    # 尝试创建
-                    # 注意：如果两个请求同时到这里，第二个会触发 Unique Constraint 错误
-                    sp = models.Species(common_name=species_label)
-                    db.add(sp)
-                    db.flush()
+                    with db.begin_nested():  # SAVEPOINT
+                        sp = models.Species(common_name=species_label)
+                        db.add(sp)
+                        db.flush()
                 except IntegrityError:
-                    # 捕获竞争条件错误，回滚子事务，重新查询即可
-                    db.rollback()
+                    # Another request created it first - just fetch it
+                    # The savepoint was rolled back, but our Catch is safe!
                     sp = db.query(models.Species).filter(
                         models.Species.common_name.ilike(species_label)
                     ).first()
+                # ================================================
 
             # 3. 只有已登录用户才关联 UserSpecies (点亮图鉴)
             if user_id and sp:
-                # 同样的逻辑，防止 UserSpecies 重复
                 link = db.query(models.UserSpecies).filter_by(
                     user_id=user_id, 
                     species_id=sp.id
                 ).first()
                 
                 if link is None:
+                    # ============== FIX: Use savepoint ==============
                     try:
-                        db.add(models.UserSpecies(user_id=user_id, species_id=sp.id))
-                        db.flush()
+                        with db.begin_nested():  # SAVEPOINT
+                            db.add(models.UserSpecies(user_id=user_id, species_id=sp.id))
+                            db.flush()
                     except IntegrityError:
-                        db.rollback()
-                        # 已经存在了，忽略即可
+                        # Link already exists from concurrent request - that's fine
                         pass
+                    # ================================================
 
         db.commit()
         db.refresh(catch)
